@@ -74,6 +74,16 @@ object BackupTableCatalog {
                 integer("archivedAt"),
                 text("archiveBatchId"),
                 text("defaultTemplateId"),
+                text("loginDevice"),
+            ),
+        ),
+        Table(
+            name = "game_server_options",
+            columns = listOf(
+                text("id"),
+                text("gameName"),
+                text("name"),
+                integer("sortOrder"),
             ),
         ),
         Table(
@@ -176,6 +186,19 @@ object BackupTableCatalog {
                 integer("weeklyRefreshMinutes"),
                 integer("createdAt"),
                 text("renewalOperationId"),
+            ),
+        ),
+        Table(
+            name = "order_price_changes",
+            columns = listOf(
+                text("id"),
+                text("operationId"),
+                text("orderId"),
+                text("periodId"),
+                integer("previousPriceCents"),
+                integer("newPriceCents"),
+                text("reason"),
+                integer("createdAt"),
             ),
         ),
         Table(
@@ -315,6 +338,13 @@ object BackupTableCatalog {
 
     /** Tables in the archive, parents first. */
     val includedTables: List<Table> = tables.filter { it.included }
+
+    /**
+     * Tables introduced after the oldest restorable backup generation. A file that
+     * predates them decodes with these tables empty instead of being rejected; every
+     * other table must be present with its exact column list.
+     */
+    val legacyOptionalTables: Set<String> = setOf("game_server_options", "order_price_changes")
 
     /** Tables that exist in the schema but are intentionally local-only. */
     val localOnlyTables: List<Table> = tables.filterNot { it.included }

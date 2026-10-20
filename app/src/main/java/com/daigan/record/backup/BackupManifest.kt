@@ -105,7 +105,9 @@ object BackupManifestCodec {
         }
         val schemaVersion = root.int("schemaVersion")
             ?: throw BackupException("备份清单缺少数据库版本，无法恢复。")
-        if (schemaVersion != currentSchemaVersion && !(schemaVersion == 7 && currentSchemaVersion == 8)) {
+        // Older generations restorable into this build: v1.6 restored 7 into 8, and the
+        // column/table fill in the data codec keeps every generation since 7 restorable.
+        if (schemaVersion !in 7..currentSchemaVersion) {
             throw BackupException(
                 "该备份来自数据版本 $schemaVersion，当前应用只支持版本 $currentSchemaVersion，无法恢复。",
             )
@@ -122,7 +124,9 @@ object BackupManifestCodec {
         val countsObject = root["tableCounts"] as? JsonObject
             ?: throw BackupException("备份清单缺少数据统计，无法恢复。")
         val expectedTables = BackupTableCatalog.includedTables.map { it.name }.toSet()
-        if (countsObject.keys != expectedTables) {
+        val unknown = countsObject.keys - expectedTables
+        val missingRequired = expectedTables - BackupTableCatalog.legacyOptionalTables - countsObject.keys
+        if (unknown.isNotEmpty() || missingRequired.isNotEmpty()) {
             throw BackupException("备份的数据表清单与当前版本不一致，无法恢复。")
         }
         val tableCounts = LinkedHashMap<String, Int>()

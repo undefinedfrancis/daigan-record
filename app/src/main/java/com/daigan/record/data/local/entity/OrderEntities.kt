@@ -341,3 +341,50 @@ data class AttachmentEntity(
     val sizeBytes: Long,
     val createdAt: Instant,
 )
+
+/**
+ * Audit row for one agreed-price correction (UF-012). The old and new amounts are
+ * snapshots; actual receipt rows are never rewritten by a price change. Rows stay
+ * RESTRICT-attached to their order and period so an audited order cannot vanish
+ * silently; deletion paths must remove the audit rows first inside their transaction.
+ */
+@Entity(
+    tableName = "order_price_changes",
+    foreignKeys = [
+        ForeignKey(
+            entity = OrderEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["orderId"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = HostingPeriodEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["periodId"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["orderId"], name = "index_order_price_changes_orderId"),
+        Index(value = ["periodId"], name = "index_order_price_changes_periodId"),
+        Index(
+            value = ["operationId"],
+            unique = true,
+            name = "index_order_price_changes_operationId",
+        ),
+    ],
+)
+data class OrderPriceChangeEntity(
+    @PrimaryKey val id: String,
+    /** Idempotency key of the price-edit command. */
+    val operationId: String,
+    val orderId: String,
+    /** Null for a short-order price; set for a hosting period price. */
+    val periodId: String?,
+    val previousPriceCents: Long,
+    val newPriceCents: Long,
+    val reason: String?,
+    val createdAt: Instant,
+)

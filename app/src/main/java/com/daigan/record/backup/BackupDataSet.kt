@@ -144,6 +144,7 @@ object BackupDataCodec {
             val addedColumn = when (name) {
                 "orders" -> "cancelledAt"
                 "task_definitions", "template_tasks" -> "monthDay"
+                "game_accounts" -> "loginDevice"
                 else -> null
             }
             val legacyColumns = addedColumn != null && columns == spec.columnNames.filter { it != addedColumn }
@@ -173,12 +174,14 @@ object BackupDataCodec {
             byName[name] = BackupDataSet.TableRows(spec, rows)
         }
         val missing = expected.filter { it.name !in byName }
-        if (missing.isNotEmpty()) {
+        val requiredMissing = missing.filter { it.name !in BackupTableCatalog.legacyOptionalTables }
+        if (requiredMissing.isNotEmpty()) {
             throw BackupException(
-                "备份缺少数据表「${missing.first().name}」，无法恢复。",
+                "备份缺少数据表「${requiredMissing.first().name}」，无法恢复。",
             )
         }
-        return BackupDataSet(expected.map { byName.getValue(it.name) })
+        // Tables added after the backup's generation default to empty rows.
+        return BackupDataSet(expected.map { byName[it.name] ?: BackupDataSet.TableRows(it, emptyList()) })
     }
 
     private fun decodeValue(

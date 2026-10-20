@@ -60,6 +60,8 @@ data class GameAccountEntity(
      * is treated as "no default" on read.
      */
     val defaultTemplateId: String? = null,
+    /** Optional free-text login device (手机/平板/电脑/自定义); null on legacy accounts. */
+    val loginDevice: String? = null,
 ) {
     fun toModel(): GameAccount = GameAccount(
         id = id,

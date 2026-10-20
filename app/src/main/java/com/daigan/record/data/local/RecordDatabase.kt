@@ -32,12 +32,14 @@ import com.daigan.record.data.local.entity.GameTemplateEntity
 import com.daigan.record.data.local.entity.HostingPeriodEntity
 import com.daigan.record.data.local.entity.OrderCreationOperationEntity
 import com.daigan.record.data.local.entity.OrderEntity
+import com.daigan.record.data.local.entity.OrderPriceChangeEntity
 import com.daigan.record.data.local.entity.OwnerEntity
 import com.daigan.record.data.local.entity.OwnerNumberSequenceEntity
 import com.daigan.record.data.local.entity.ReceiptCorrectionEntity
 import com.daigan.record.data.local.entity.ReceiptEntity
 import com.daigan.record.data.local.entity.ReminderDeliveryEntity
 import com.daigan.record.data.local.entity.ReminderSettingsEntity
+import com.daigan.record.data.local.entity.ServerOptionEntity
 import com.daigan.record.data.local.entity.TaskDefinitionEntity
 import com.daigan.record.data.local.entity.TaskOccurrenceEntity
 import com.daigan.record.data.local.entity.TemplateCategoryEntity
@@ -64,8 +66,11 @@ import com.daigan.record.data.local.entity.TemplateTaskEntity
  *       by the restore commit point, and the reminder delivery log. Existing rows are
  *       untouched; reminders stay disabled until the user enables them.
  * 7 -> 8 adds nullable order cancellation and monthly task day fields, retaining legacy rows.
+ * 8 -> 9 adds the optional account login device, per-game server options and the
+ *       order price-change audit table. Existing rows are untouched; legacy accounts
+ *       keep a NULL device and both new tables start empty.
  */
-const val RECORD_DATABASE_VERSION = 8
+const val RECORD_DATABASE_VERSION = 9
 
 /**
  * The single source of truth for business data.
@@ -95,6 +100,8 @@ const val RECORD_DATABASE_VERSION = 8
         ReminderSettingsEntity::class,
         AppSettingsEntity::class,
         ReminderDeliveryEntity::class,
+        ServerOptionEntity::class,
+        OrderPriceChangeEntity::class,
     ],
     version = RECORD_DATABASE_VERSION,
     exportSchema = true,
@@ -695,6 +702,67 @@ abstract class RecordDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v1.7 adds the account login device, per-game server options and the price
+         * audit table. Only new surface: no business row is rewritten, and historical
+         * accounts keep a NULL device.
+         */
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `game_accounts` ADD COLUMN `loginDevice` TEXT")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `game_server_options` (
+                        `id` TEXT NOT NULL,
+                        `gameName` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `sortOrder` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS " +
+                        "`index_game_server_options_gameName_sortOrder` " +
+                        "ON `game_server_options` (`gameName`, `sortOrder`)",
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `order_price_changes` (
+                        `id` TEXT NOT NULL,
+                        `operationId` TEXT NOT NULL,
+                        `orderId` TEXT NOT NULL,
+                        `periodId` TEXT,
+                        `previousPriceCents` INTEGER NOT NULL,
+                        `newPriceCents` INTEGER NOT NULL,
+                        `reason` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`orderId`) REFERENCES `orders`(`id`)
+                            ON UPDATE CASCADE ON DELETE RESTRICT,
+                        FOREIGN KEY(`periodId`) REFERENCES `hosting_periods`(`id`)
+                            ON UPDATE CASCADE ON DELETE RESTRICT
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_order_price_changes_orderId` " +
+                        "ON `order_price_changes` (`orderId`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_order_price_changes_periodId` " +
+                        "ON `order_price_changes` (`periodId`)",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                        "`index_order_price_changes_operationId` " +
+                        "ON `order_price_changes` (`operationId`)",
+                )
+            }
+        }
+
         /** Every migration the app must run; the list is also used by tests. */
         val ALL_MIGRATIONS: Array<Migration> = arrayOf(
             MIGRATION_1_2,
@@ -704,6 +772,7 @@ abstract class RecordDatabase : RoomDatabase() {
             MIGRATION_5_6,
             MIGRATION_6_7,
             MIGRATION_7_8,
+            MIGRATION_8_9,
         )
     }
 }
