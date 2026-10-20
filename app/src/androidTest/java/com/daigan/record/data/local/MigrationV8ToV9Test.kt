@@ -60,16 +60,16 @@ class MigrationV8ToV9Test {
 
     @Test
     fun everyHistoricalExportMigratesThroughTheShippedChainToCurrentVersion() {
-        for (version in 1 until RecordDatabase.RECORD_DATABASE_VERSION) {
+        for (version in 1 until RECORD_DATABASE_VERSION) {
             context.deleteDatabase(databaseName)
             helper.createDatabase(databaseName, version).close()
             helper.runMigrationsAndValidate(
                 databaseName,
-                RecordDatabase.RECORD_DATABASE_VERSION,
+                RECORD_DATABASE_VERSION,
                 true,
                 *RecordDatabase.ALL_MIGRATIONS,
             ).use { database ->
-                assertEquals(RecordDatabase.RECORD_DATABASE_VERSION, database.version)
+                assertEquals(RECORD_DATABASE_VERSION, database.version)
             }
         }
     }

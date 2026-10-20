@@ -124,15 +124,32 @@ class AccountFormFieldsTest {
         val reloaded = env.accountRepository.findAccount(account.id)!!
         assertEquals(LoginMethod.QR_CODE, reloaded.loginMethod)
         assertEquals("模拟器", reloaded.loginDevice)
+        }
+    }
 
-        // Display-after-reload: the form shows the stored device.
-        var reloadedDraft by mutableStateOf(AccountDraft.from(reloaded))
+    @Test
+    fun storedDeviceAndQrMethodDisplayAfterReload() {
+        val stored = com.daigan.record.data.model.GameAccount(
+            id = "account-1",
+            ownerId = "owner-1",
+            gameName = "原神",
+            server = "官服",
+            uid = "100001",
+            loginAccount = "demo",
+            loginMethod = LoginMethod.QR_CODE,
+            password = null,
+            createdAt = java.time.Instant.EPOCH,
+            archived = false,
+            archivedWithOwner = false,
+            loginDevice = "模拟器",
+        )
+        val reloadedDraft = AccountDraft.from(stored)
         composeTestRule.setContent {
             DaiganRecordTheme {
                 AccountFormScreen(
                     uiState = AccountFormUiState(isEdit = true, draft = reloadedDraft),
                     onBack = {},
-                    onDraftChange = { transform -> reloadedDraft = transform(reloadedDraft) },
+                    onDraftChange = {},
                     onSelectLoginMethod = {},
                     onSelectTemplate = {},
                     onSave = {},
@@ -141,7 +158,6 @@ class AccountFormFieldsTest {
         }
         composeTestRule.onNodeWithText("模拟器").assertIsDisplayed()
         composeTestRule.onNodeWithText("扫码登录").assertIsDisplayed()
-        }
     }
 
     @Test
