@@ -89,7 +89,7 @@ class ReceiptLedger @Inject constructor(
 
         val paid = effectivePaidCents(request.orderId, request.periodId, excludingReceiptId = null)
         val remaining = Money.remainingCents(priceCents, paid)
-        require(remaining > 0) { "该款项已经结清，无需再次收款" }
+        require(remaining > 0) { "当前款项已收齐或多收，无需收款" }
         require(request.amountCents <= remaining) {
             "收款金额超过待收余额 ${Money.formatCents(remaining)}"
         }

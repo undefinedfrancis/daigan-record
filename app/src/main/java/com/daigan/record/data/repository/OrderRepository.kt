@@ -42,6 +42,7 @@ import com.daigan.record.data.model.OccurrenceSlot
 import com.daigan.record.data.model.Order
 import com.daigan.record.data.model.OrderCommandFingerprint
 import com.daigan.record.data.model.OrderDetail
+import com.daigan.record.data.model.OrderPriceChangeRecord
 import com.daigan.record.data.model.OrderSummary
 import com.daigan.record.data.model.Money
 import com.daigan.record.data.model.OrderTask
@@ -117,6 +118,33 @@ interface OrderRepository {
     }
     suspend fun deleteUnusedOrder(orderId: String) { error("不支持删除订单") }
     suspend fun cancelOrder(orderId: String) { error("不支持作废订单") }
+
+    /** Renames the order in place; identity, periods, tasks, check-ins and receipts stay. */
+    suspend fun updateOrderTitle(orderId: String, title: String) { error("不支持修改订单名称") }
+
+    /**
+     * Corrects one short order's agreed price. Receipts are never rewritten; the change
+     * is audited under [operationId], which makes retries idempotent.
+     */
+    suspend fun updateShortOrderPrice(
+        orderId: String,
+        priceCents: Long,
+        operationId: String,
+        reason: String?,
+    ) {
+        error("不支持修改价格")
+    }
+
+    /** Like [updateShortOrderPrice] but for exactly one hosting period's price. */
+    suspend fun updatePeriodPrice(
+        orderId: String,
+        periodId: String,
+        priceCents: Long,
+        operationId: String,
+        reason: String?,
+    ) {
+        error("不支持修改价格")
+    }
 
 
     fun observeOrdersForOwner(ownerId: String): Flow<List<OrderSummary>>
@@ -335,6 +363,7 @@ class DefaultOrderRepository @Inject constructor(
         val periods: List<HostingPeriodEntity>,
         val receipts: List<ReceiptEntity>,
         val corrections: List<ReceiptCorrectionEntity>,
+        val priceChanges: List<com.daigan.record.data.local.entity.OrderPriceChangeEntity>,
     )
 
     private data class TodayHostingSnapshot(
@@ -371,6 +400,7 @@ class DefaultOrderRepository @Inject constructor(
             attachmentDao.observeForOrder(orderId).map { Unit },
             receiptDao.observeForOrder(orderId).map { Unit },
             receiptDao.observeCorrectionsForOrder(orderId).map { Unit },
+            orderDao.observePriceChanges(orderId).map { Unit },
             accountDao.observeAll().map { Unit },
             ownerDao.observeAll().map { Unit },
         ).mapLatest {
@@ -405,6 +435,7 @@ class DefaultOrderRepository @Inject constructor(
             periods = orderDao.findPeriods(orderId),
             receipts = receiptDao.findForOrder(orderId),
             corrections = receiptDao.findCorrectionsForOrder(orderId),
+            priceChanges = orderDao.findPriceChanges(orderId),
         )
     }
 
@@ -418,6 +449,18 @@ class DefaultOrderRepository @Inject constructor(
         attachments = attachments.map { it.toModel() },
         receipts = receipts.map { it.toModel() },
         receiptCorrections = corrections.map { it.toModel() },
+        priceChanges = priceChanges.map {
+            OrderPriceChangeRecord(
+                id = it.id,
+                operationId = it.operationId,
+                orderId = it.orderId,
+                periodId = it.periodId,
+                previousPriceCents = it.previousPriceCents,
+                newPriceCents = it.newPriceCents,
+                reason = it.reason,
+                createdAt = it.createdAt,
+            )
+        },
         today = GameCalendar.gameDate(now, refreshOf(order)),
         now = now,
     )
@@ -1401,6 +1444,106 @@ class DefaultOrderRepository @Inject constructor(
         database.withDatasetTransaction {
             val order = orderDao.findById(orderId) ?: error("订单不存在")
             if (order.cancelledAt == null) orderDao.cancel(orderId, ticker.now())
+        }
+    }
+
+    override suspend fun updateOrderTitle(orderId: String, title: String) {
+        val trimmed = title.trim()
+        require(trimmed.isNotEmpty()) { "请填写订单名称" }
+        require(trimmed.length <= com.daigan.record.data.model.ShortOrderDraft.MAX_TITLE_LENGTH) {
+            "订单名称最多 ${com.daigan.record.data.model.ShortOrderDraft.MAX_TITLE_LENGTH} 个字符"
+        }
+        database.withDatasetTransaction {
+            orderDao.findById(orderId) ?: error("订单不存在")
+            orderDao.updateTitle(orderId, trimmed, ticker.now())
+        }
+    }
+
+    override suspend fun updateShortOrderPrice(
+        orderId: String,
+        priceCents: Long,
+        operationId: String,
+        reason: String?,
+    ) {
+        updateAgreedPrice(
+            orderId = orderId,
+            periodId = null,
+            priceCents = priceCents,
+            operationId = operationId,
+            reason = reason,
+        )
+    }
+
+    override suspend fun updatePeriodPrice(
+        orderId: String,
+        periodId: String,
+        priceCents: Long,
+        operationId: String,
+        reason: String?,
+    ) {
+        updateAgreedPrice(
+            orderId = orderId,
+            periodId = periodId,
+            priceCents = priceCents,
+            operationId = operationId,
+            reason = reason,
+        )
+    }
+
+    /**
+     * Shared price-correction core (UF-012). The agreed price changes on exactly one
+     * payable item — a short order or one hosting period — and a matching audit row is
+     * written in the same transaction. Actual receipt rows are never rewritten, so an
+     * already-collected amount that now exceeds the price simply shows as 多收.
+     * Retrying the same [operationId] is a no-op.
+     */
+    private suspend fun updateAgreedPrice(
+        orderId: String,
+        periodId: String?,
+        priceCents: Long,
+        operationId: String,
+        reason: String?,
+    ) {
+        require(operationId.isNotBlank()) { "操作标识不能为空" }
+        require(priceCents in 0..Money.MAX_CENTS) { "金额需为 0 到 ${Money.MAX_CENTS} 分之间" }
+        require((reason?.trim()?.length ?: 0) <= com.daigan.record.data.model.RECEIPT_REASON_MAX_LENGTH) {
+            "更正原因最多 ${com.daigan.record.data.model.RECEIPT_REASON_MAX_LENGTH} 个字符"
+        }
+        val normalizedReason = reason?.trim()?.ifBlank { null }
+        database.withDatasetTransaction {
+            orderDao.findPriceChangeByOperationId(operationId)?.let { return@withDatasetTransaction }
+            val order = orderDao.findById(orderId) ?: error("订单不存在")
+            require(order.cancelledAt == null) { "该订单已作废，不能修改价格" }
+            val previous = if (periodId == null) {
+                require(order.type == OrderType.SHORT_TASK) { "托管订单请修改期次价格" }
+                order.priceCents ?: 0L
+            } else {
+                require(order.type == OrderType.HOSTING) { "短期订单没有托管期次" }
+                val period = orderDao.findPeriod(periodId)
+                    ?: error("托管期次不存在")
+                require(period.orderId == orderId) { "所选期次不属于该订单" }
+                period.priceCents
+            }
+            if (previous != priceCents) {
+                if (periodId == null) {
+                    orderDao.updateShortPrice(orderId, priceCents, ticker.now())
+                } else {
+                    orderDao.updatePeriodPrice(periodId, priceCents)
+                    orderDao.touch(orderId, ticker.now())
+                }
+            }
+            orderDao.insertPriceChange(
+                com.daigan.record.data.local.entity.OrderPriceChangeEntity(
+                    id = UUID.randomUUID().toString(),
+                    operationId = operationId,
+                    orderId = orderId,
+                    periodId = periodId,
+                    previousPriceCents = previous,
+                    newPriceCents = priceCents,
+                    reason = normalizedReason,
+                    createdAt = PersistedInstant.normalize(ticker.now()),
+                ),
+            )
         }
     }
 

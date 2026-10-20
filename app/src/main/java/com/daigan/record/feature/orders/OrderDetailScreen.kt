@@ -78,6 +78,9 @@ fun OrderDetailScreen(
     var showRenewDialog by rememberSaveable { mutableStateOf(false) }
     var showDateEditDialog by rememberSaveable { mutableStateOf(false) }
     var renewalOperationId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
+    var showTitleEditDialog by rememberSaveable { mutableStateOf(false) }
+    var showPriceEditDialog by rememberSaveable { mutableStateOf(false) }
+    var priceEditOperationId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
 
     // Payment/correction dialog state. Operation ids are created once per dialog and
     // survive a failed submission so a retry is idempotent.
@@ -184,6 +187,8 @@ fun OrderDetailScreen(
                 onEditDates = { showDateEditDialog = true },
                 onDeleteOrder = viewModel::deleteOrder,
                 onCancelOrder = viewModel::cancelOrder,
+                onRenameOrder = { showTitleEditDialog = true },
+                onEditPrice = { showPriceEditDialog = true },
                 modifier = Modifier.padding(padding),
             )
         }
@@ -193,6 +198,22 @@ fun OrderDetailScreen(
     if (showDateEditDialog && detail != null && !detail.order.cancelled) {
         OrderDateEditDialog(detail, uiState.maintenanceInFlight,
             onDismiss = { showDateEditDialog = false }, onSave = viewModel::updateOrderDates)
+    }
+    if (showTitleEditDialog && detail != null && !detail.order.cancelled) {
+        OrderTitleEditDialog(detail, uiState.maintenanceInFlight,
+            onDismiss = { showTitleEditDialog = false }, onSave = { title ->
+                showTitleEditDialog = false
+                viewModel.updateTitle(title)
+            })
+    }
+    if (showPriceEditDialog && detail != null && !detail.order.cancelled) {
+        OrderPriceEditDialog(detail, uiState.maintenanceInFlight,
+            onDismiss = { if (!uiState.maintenanceInFlight) showPriceEditDialog = false },
+            onSave = { periodId, priceYuan, reason ->
+                showPriceEditDialog = false
+                viewModel.updatePrice(periodId, priceYuan, priceEditOperationId, reason)
+                priceEditOperationId = UUID.randomUUID().toString()
+            })
     }
     if (showRenewDialog && detail != null && detail.isHosting && !detail.order.cancelled) {
         RenewalDialog(
@@ -308,6 +329,8 @@ internal fun OrderDetailContent(
     onEditDates: () -> Unit = {},
     onDeleteOrder: () -> Unit = {},
     onCancelOrder: () -> Unit = {},
+    onRenameOrder: () -> Unit = {},
+    onEditPrice: () -> Unit = {},
     maintenanceInFlight: Boolean = false,
 ) {
     val canWrite = !detail.order.cancelled && !maintenanceInFlight && !detail.owner.archived && !detail.account.archived
@@ -331,6 +354,8 @@ internal fun OrderDetailContent(
                                 onEdit = { showManagement = false; onEditDates() },
                                 onDelete = { showManagement = false; onDeleteOrder() },
                                 onCancel = { showManagement = false; onCancelOrder() },
+                                onRename = { showManagement = false; onRenameOrder() },
+                                onEditPrice = { showManagement = false; onEditPrice() },
                                 busy = maintenanceInFlight,
                             )
                         }
@@ -1082,6 +1107,14 @@ private fun PaymentSection(
                     label = "合计待收",
                     value = Money.formatCents(balance.totalOutstandingCents),
                 )
+                if (balance.totalOverpaidCents > 0L) {
+                    Text(
+                        text = "已收超过约定价格 " + Money.formatCents(balance.totalOverpaidCents) +
+                            "（多收）。改价不会改写收款流水，可作废或更正收款后再收。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             } else {
                 val item = balance.items.firstOrNull()
                 LabeledValue(
@@ -1146,10 +1179,10 @@ private fun PaymentSection(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = if (item.settled) {
-                            "已结清"
-                        } else {
-                            "待收 ${Money.formatCents(item.outstandingCents)}"
+                        text = when {
+                            item.overpaidCents > 0L -> "多收 ${Money.formatCents(item.overpaidCents)}"
+                            item.settled -> "已结清"
+                            else -> "待收 ${Money.formatCents(item.outstandingCents)}"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1171,6 +1204,43 @@ private fun PaymentSection(
                         canPay = canPay,
                         onAmend = { onAmendReceipt(receipt) },
                         onVoid = { onVoidReceipt(receipt) },
+                    )
+                }
+            }
+        }
+    }
+
+    if (detail.priceChanges.isNotEmpty()) {
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "价格修改记录 · ${detail.priceChanges.size} 次",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = "只记录约定价格的更正；对应收款流水从未被改写。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                detail.priceChanges.forEach { change ->
+                    Text(
+                        text = buildString {
+                            append("第 ${((change.periodId?.let { id ->
+                                detail.periods.firstOrNull { it.id == id }?.periodIndex
+                            } ?: 0) + 1)} 处价格 ")
+                            append(Money.formatCents(change.previousPriceCents))
+                            append(" → ")
+                            append(Money.formatCents(change.newPriceCents))
+                            append(" · ")
+                            append(formatInstant(change.createdAt))
+                            if (!change.reason.isNullOrBlank()) {
+                                append(" · 原因：")
+                                append(change.reason)
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                 }
             }

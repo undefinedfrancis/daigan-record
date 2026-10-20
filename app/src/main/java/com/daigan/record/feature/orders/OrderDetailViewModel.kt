@@ -82,6 +82,20 @@ class OrderDetailViewModel @Inject constructor(
     fun deleteOrder() = maintainOrder(true) { orderRepository.deleteUnusedOrder(orderId) }
     fun cancelOrder() = maintainOrder(false) { orderRepository.cancelOrder(orderId) }
 
+    fun updateTitle(title: String) =
+        maintainOrder(false) { orderRepository.updateOrderTitle(orderId, title) }
+
+    /** Price correction; [operationId] retries are idempotent inside the repository. */
+    fun updatePrice(periodId: String?, priceYuan: String, operationId: String, reason: String) =
+        maintainOrder(false) {
+            val cents = com.daigan.record.data.model.Money.parseYuanToCents(priceYuan)
+            if (periodId == null) {
+                orderRepository.updateShortOrderPrice(orderId, cents, operationId, reason)
+            } else {
+                orderRepository.updatePeriodPrice(orderId, periodId, cents, operationId, reason)
+            }
+        }
+
     private fun maintainOrder(deleted: Boolean, block: suspend () -> Unit) {
         if (_uiState.value.maintenanceInFlight) return
         _uiState.value = _uiState.value.copy(maintenanceInFlight = true)

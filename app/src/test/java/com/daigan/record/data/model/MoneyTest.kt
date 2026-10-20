@@ -31,4 +31,13 @@ class MoneyTest {
         assertEquals("¥100.50", Money.formatCents(10050))
         assertEquals("100.50", Money.centsToYuanText(10050))
     }
+
+    @Test
+    fun `overpaid balances clamp remaining at zero and report the surplus`() {
+        assertEquals(0L, Money.remainingCents(100, 150))
+        assertEquals(50L, Money.overpaidCents(100, 150))
+        assertEquals(0L, Money.overpaidCents(100, 100))
+        assertEquals(25L, Money.remainingCents(100, 75))
+        assertEquals(0L, Money.overpaidCents(100, 75))
+    }
 }

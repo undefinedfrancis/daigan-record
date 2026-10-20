@@ -244,6 +244,8 @@ data class OrderDetail(
     /** Every receipt, including voided and superseded rows, newest actual time first. */
     val receipts: List<Receipt>,
     val receiptCorrections: List<ReceiptCorrectionRecord>,
+    /** Agreed-price corrections, oldest first; receipts themselves are never rewritten. */
+    val priceChanges: List<OrderPriceChangeRecord> = emptyList(),
     val today: LocalDate,
     /** Clock instant used to resolve the current weekly window. */
     val now: Instant,
@@ -367,6 +369,19 @@ private fun GameRefreshRulesDomain.toCoreForRules(): com.daigan.record.core.time
 data class UndoConflict(
     val description: String,
     val reason: String,
+)
+
+/** One audited agreed-price correction (UF-012). */
+data class OrderPriceChangeRecord(
+    val id: String,
+    val operationId: String,
+    val orderId: String,
+    /** Null for a short-order price; set for a hosting period price. */
+    val periodId: String?,
+    val previousPriceCents: Long,
+    val newPriceCents: Long,
+    val reason: String?,
+    val createdAt: Instant,
 )
 
 data class BulkCompletionResult(

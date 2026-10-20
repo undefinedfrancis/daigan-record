@@ -59,16 +59,21 @@ object Money {
     }
 
     /**
-     * Remaining balance for one payable item. Both inputs are cents; a negative result
-     * is impossible for valid data but is reported instead of silently clamped.
+     * Remaining balance for one payable item. Both inputs are cents. Overpaid states
+     * (receipts above a revised price) are legal and clamp the remaining at zero; the
+     * surplus is reported separately by [overpaidCents] instead of throwing here.
      */
     fun remainingCents(priceCents: Long, paidCents: Long): Long {
         require(priceCents >= 0) { "约定价格不能为负数" }
         require(paidCents >= 0) { "已收金额不能为负数" }
-        require(paidCents <= priceCents) {
-            "已收金额超出台账价格，请检查收款记录"
-        }
-        return priceCents - paidCents
+        return (priceCents - paidCents).coerceAtLeast(0L)
+    }
+
+    /** Surplus when effective receipts exceed the agreed price; zero otherwise. */
+    fun overpaidCents(priceCents: Long, paidCents: Long): Long {
+        require(priceCents >= 0) { "约定价格不能为负数" }
+        require(paidCents >= 0) { "已收金额不能为负数" }
+        return (paidCents - priceCents).coerceAtLeast(0L)
     }
 
     /** "¥100.00" — always two decimals so integer cents stay visible. */

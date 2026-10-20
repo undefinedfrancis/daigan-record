@@ -235,6 +235,27 @@ interface OrderDao {
     @Query("UPDATE orders SET deadlineDate = :date, updatedAt = :now WHERE id = :orderId")
     suspend fun updateDeadline(orderId: String, date: LocalDate?, now: Instant)
 
+    @Query("UPDATE orders SET title = :title, updatedAt = :now WHERE id = :orderId")
+    suspend fun updateTitle(orderId: String, title: String, now: Instant)
+
+    @Query("UPDATE orders SET priceCents = :priceCents, updatedAt = :now WHERE id = :orderId")
+    suspend fun updateShortPrice(orderId: String, priceCents: Long, now: Instant)
+
+    @Query("UPDATE hosting_periods SET priceCents = :priceCents WHERE id = :periodId")
+    suspend fun updatePeriodPrice(periodId: String, priceCents: Long)
+
+    @Insert
+    suspend fun insertPriceChange(change: com.daigan.record.data.local.entity.OrderPriceChangeEntity)
+
+    @Query("SELECT * FROM order_price_changes WHERE orderId = :orderId ORDER BY createdAt ASC, id ASC")
+    suspend fun findPriceChanges(orderId: String): List<com.daigan.record.data.local.entity.OrderPriceChangeEntity>
+
+    @Query("SELECT * FROM order_price_changes WHERE orderId = :orderId ORDER BY createdAt ASC, id ASC")
+    fun observePriceChanges(orderId: String): Flow<List<com.daigan.record.data.local.entity.OrderPriceChangeEntity>>
+
+    @Query("SELECT * FROM order_price_changes WHERE operationId = :operationId")
+    suspend fun findPriceChangeByOperationId(operationId: String): com.daigan.record.data.local.entity.OrderPriceChangeEntity?
+
     @Query("UPDATE orders SET cancelledAt = :now, updatedAt = :now WHERE id = :orderId AND cancelledAt IS NULL")
     suspend fun cancel(orderId: String, now: Instant)
 

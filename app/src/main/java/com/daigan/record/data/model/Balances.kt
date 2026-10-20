@@ -18,6 +18,8 @@ data class PayableBalance(
     val priceCents: Long,
     val paidCents: Long,
     val outstandingCents: Long,
+    /** Effective receipts above the agreed price (e.g. after a price correction). */
+    val overpaidCents: Long = 0L,
 ) {
     val settled: Boolean get() = outstandingCents == 0L
 
@@ -48,6 +50,8 @@ data class OrderBalance(
     val totalPaidCents: Long,
     val totalOutstandingCents: Long,
     val currentPeriodId: String?,
+    /** Sum of per-item overpaid surpluses; zero for cancelled orders. */
+    val totalOverpaidCents: Long = 0L,
 ) {
     val hosting: Boolean get() = orderType == OrderType.HOSTING
 
@@ -118,6 +122,7 @@ object Balances {
                 priceCents = price,
                 paidCents = paid,
                 outstandingCents = if (order.cancelled) 0L else Money.remainingCents(price, paid),
+                overpaidCents = if (order.cancelled) 0L else Money.overpaidCents(price, paid),
             )
             return OrderBalance(
                 orderId = order.id,
@@ -128,6 +133,7 @@ object Balances {
                 totalPaidCents = item.paidCents,
                 totalOutstandingCents = item.outstandingCents,
                 currentPeriodId = null,
+                totalOverpaidCents = item.overpaidCents,
             )
         }
 
@@ -145,6 +151,7 @@ object Balances {
                 priceCents = period.priceCents,
                 paidCents = paid,
                 outstandingCents = if (order.cancelled) 0L else Money.remainingCents(period.priceCents, paid),
+                overpaidCents = if (order.cancelled) 0L else Money.overpaidCents(period.priceCents, paid),
             )
         }
         return OrderBalance(
@@ -156,6 +163,7 @@ object Balances {
             totalPaidCents = Money.sumCents(items.map { it.paidCents }),
             totalOutstandingCents = Money.sumCents(items.map { it.outstandingCents }),
             currentPeriodId = descending.firstOrNull()?.id,
+            totalOverpaidCents = Money.sumCents(items.map { it.overpaidCents }),
         )
     }
 }
