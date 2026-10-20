@@ -76,5 +76,6 @@ data class GameAccountEntity(
         archived = archivedAt != null,
         archivedWithOwner = archiveBatchId != null,
         defaultTemplateId = defaultTemplateId,
+        loginDevice = loginDevice,
     )
 }

@@ -59,6 +59,7 @@ fun TemplateLibraryScreen(
     onBack: () -> Unit,
     onCreateTemplate: () -> Unit,
     onEditTemplate: (String) -> Unit,
+    onManageServerOptions: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: TemplateLibraryViewModel = hiltViewModel(),
 ) {
@@ -141,6 +142,12 @@ fun TemplateLibraryScreen(
                         Icon(Icons.Filled.FileUpload, contentDescription = null)
                         Text("导入", modifier = Modifier.padding(start = 4.dp))
                     }
+                }
+                TextButton(
+                    onClick = onManageServerOptions,
+                    modifier = Modifier.testTag("template-library-server-options"),
+                ) {
+                    Text("区服选项（按游戏自定义）")
                 }
             }
 

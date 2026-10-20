@@ -13,12 +13,14 @@ import com.daigan.record.data.repository.DefaultGameTemplateRepository
 import com.daigan.record.data.repository.DefaultOrderRepository
 import com.daigan.record.data.repository.DefaultOwnerRepository
 import com.daigan.record.data.repository.DefaultReceiptRepository
+import com.daigan.record.data.repository.DefaultServerOptionRepository
 import com.daigan.record.data.repository.DefaultStatisticsRepository
 import com.daigan.record.data.repository.GameAccountRepository
 import com.daigan.record.data.repository.GameTemplateRepository
 import com.daigan.record.data.repository.OrderRepository
 import com.daigan.record.data.repository.OwnerRepository
 import com.daigan.record.data.repository.ReceiptRepository
+import com.daigan.record.data.repository.ServerOptionRepository
 import com.daigan.record.data.repository.StatisticsRepository
 import com.daigan.record.data.template.AssetBuiltInTemplateSource
 import com.daigan.record.data.template.BuiltInTemplateSource
@@ -49,6 +51,10 @@ interface DataModule {
     @Singleton
     @Binds
     fun bindsGameAccountRepository(repository: DefaultGameAccountRepository): GameAccountRepository
+
+    @Singleton
+    @Binds
+    fun bindsServerOptionRepository(repository: DefaultServerOptionRepository): ServerOptionRepository
 
     @Singleton
     @Binds

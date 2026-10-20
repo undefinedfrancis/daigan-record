@@ -10,6 +10,7 @@ object Routes {
     const val RECEIPTS = "settings/receipts"
     const val TEMPLATES = "settings/templates"
     const val TEMPLATE_EDITOR = "settings/templates/editor?templateId={templateId}"
+    const val SERVER_OPTIONS = "settings/templates/server-options"
     const val REMINDERS = "settings/reminders"
     const val BACKUP = "settings/backup"
 

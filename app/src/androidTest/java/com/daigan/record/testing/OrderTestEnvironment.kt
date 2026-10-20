@@ -28,6 +28,7 @@ import com.daigan.record.data.repository.DefaultGameTemplateRepository
 import com.daigan.record.data.repository.DefaultOrderRepository
 import com.daigan.record.data.repository.DefaultOwnerRepository
 import com.daigan.record.data.repository.DefaultReceiptRepository
+import com.daigan.record.data.repository.DefaultServerOptionRepository
 import com.daigan.record.data.repository.DefaultStatisticsRepository
 import com.daigan.record.data.repository.DisplayedHostingSnapshot
 import com.daigan.record.data.repository.LedgerSnapshotSource
@@ -213,6 +214,7 @@ class OrderTestEnvironment(
     val statisticsRepository: DefaultStatisticsRepository
     val ledgerSnapshotSource: LedgerSnapshotSource
     val templateRepository: DefaultGameTemplateRepository
+    val serverOptionRepository: DefaultServerOptionRepository
     private val dbName = databaseName
 
     init {
@@ -287,9 +289,14 @@ class OrderTestEnvironment(
         templateRepository = DefaultGameTemplateRepository(
             database = database,
             templateDao = database.templateDao(),
+            serverOptionDao = database.serverOptionDao(),
             // Real shipped assets, so tests exercise the content that users receive.
             builtInSource = AssetBuiltInTemplateSource(context),
             timeProvider = clock,
+        )
+        serverOptionRepository = DefaultServerOptionRepository(
+            database = database,
+            serverOptionDao = database.serverOptionDao(),
         )
     }
 

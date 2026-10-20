@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -154,16 +155,40 @@ internal fun AccountFormScreen(
                     )
                 }
             }
-            OutlinedTextField(
-                value = draft.server,
-                onValueChange = { value -> onDraftChange { it.copy(server = value) } },
-                label = { Text("区服") },
-                singleLine = true,
-                isError = errors.containsKey(AccountField.SERVER),
-                supportingText = { errors[AccountField.SERVER]?.let { Text(it) } },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "区服", style = MaterialTheme.typography.titleSmall)
+                if (uiState.serverOptions.isNotEmpty()) {
+                    Text(
+                        text = "点选常用区服，或在下方直接输入；选项改动不会影响已保存的账号区服。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        uiState.serverOptions.forEach { option ->
+                            FilterChip(
+                                selected = draft.server == option,
+                                onClick = { onDraftChange { it.copy(server = option) } },
+                                label = { Text(option) },
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = draft.server,
+                    onValueChange = { value -> onDraftChange { it.copy(server = value) } },
+                    label = { Text("区服") },
+                    singleLine = true,
+                    isError = errors.containsKey(AccountField.SERVER),
+                    supportingText = { errors[AccountField.SERVER]?.let { Text(it) } },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("account-server-field"),
+                )
+            }
             OutlinedTextField(
                 value = draft.uid,
                 onValueChange = { value -> onDraftChange { it.copy(uid = value) } },
@@ -221,6 +246,23 @@ internal fun AccountFormScreen(
                     )
                     Text(text = "验证码登录", modifier = Modifier.padding(start = 8.dp))
                 }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = draft.loginMethod == LoginMethod.QR_CODE,
+                            onClick = { onSelectLoginMethod(LoginMethod.QR_CODE) },
+                            role = Role.RadioButton,
+                        )
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = draft.loginMethod == LoginMethod.QR_CODE,
+                        onClick = null,
+                    )
+                    Text(text = "扫码登录", modifier = Modifier.padding(start = 8.dp))
+                }
             }
 
             if (draft.loginMethod == LoginMethod.PASSWORD) {
@@ -258,9 +300,48 @@ internal fun AccountFormScreen(
                 )
             } else {
                 Text(
-                    text = "验证码登录不会保存验证码；切换到验证码方式会清除已保存的密码。",
+                    text = if (draft.loginMethod == LoginMethod.QR_CODE) {
+                        "扫码登录只记录登录方式，应用不提供扫码；切换到非密码方式会清除已保存的密码。"
+                    } else {
+                        "验证码登录不会保存验证码；切换到验证码方式会清除已保存的密码。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "登录设备（选填）", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                ) {
+                    listOf("手机", "平板", "电脑").forEach { preset ->
+                        FilterChip(
+                            selected = draft.loginDevice == preset,
+                            onClick = {
+                                onDraftChange {
+                                    it.copy(loginDevice = if (it.loginDevice == preset) "" else preset)
+                                }
+                            },
+                            label = { Text(preset) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = draft.loginDevice,
+                    onValueChange = { value -> onDraftChange { it.copy(loginDevice = value) } },
+                    label = { Text("登录设备名称") },
+                    singleLine = true,
+                    isError = errors.containsKey(AccountField.LOGIN_DEVICE),
+                    supportingText = {
+                        Text(
+                            errors[AccountField.LOGIN_DEVICE]
+                                ?: "可点选上方常用设备，也可填写自己的名称，例如“备用机”。",
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 

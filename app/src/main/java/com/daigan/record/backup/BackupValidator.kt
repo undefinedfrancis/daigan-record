@@ -210,8 +210,11 @@ class BackupValidator @Inject constructor() {
                 ensure(account.password != null) { "备份中的密码登录账号缺少密码，无法恢复。" }
             } else {
                 ensure(account.password == null) {
-                    "备份中的验证码登录账号保存了密码，与登录方式不一致，无法恢复。"
+                    "备份中的非密码登录账号保存了密码，与登录方式不一致，无法恢复。"
                 }
+            }
+            ensure((account.loginDevice?.length ?: 0) <= 60) {
+                "备份中的登录设备名称过长，无法恢复。"
             }
         }
     }

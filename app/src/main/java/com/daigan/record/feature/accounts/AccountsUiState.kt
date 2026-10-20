@@ -56,6 +56,8 @@ data class AccountFormUiState(
     /** Optional template preselected for new orders on this account. */
     val templates: List<com.daigan.record.data.model.GameTemplateSummary> = emptyList(),
     val templateName: String? = null,
+    /** 区服 options configured for the draft's game name; empty when none. */
+    val serverOptions: List<String> = emptyList(),
 )
 
 data class ArchivedRecordsUiState(

@@ -40,6 +40,7 @@ class AccountTemplateSelectionTest {
             ownerRepository = owners,
             accountRepository = accounts,
             templateRepository = templates,
+            serverOptionRepository = com.daigan.record.testing.FakeServerOptionRepository(),
         )
         runCurrent()
         return viewModel

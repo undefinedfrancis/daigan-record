@@ -39,6 +39,7 @@ class AccountFormViewModelTest {
             ownerRepository = ownerRepository,
             accountRepository = accountRepository,
             templateRepository = FakeGameTemplateRepository(),
+            serverOptionRepository = com.daigan.record.testing.FakeServerOptionRepository(),
         )
     }
 
@@ -157,6 +158,7 @@ class AccountFormViewModelTest {
             ownerRepository = ownerRepository,
             accountRepository = accountRepository,
             templateRepository = FakeGameTemplateRepository(),
+            serverOptionRepository = com.daigan.record.testing.FakeServerOptionRepository(),
         )
         viewModel.onDraftChange {
             it.copy(gameName = "鸣潮", server = "国服", uid = "10002136", loginAccount = "demo")

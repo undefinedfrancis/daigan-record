@@ -14,6 +14,7 @@ import com.daigan.record.data.local.dao.OccurrenceDao
 import com.daigan.record.data.local.dao.OrderDao
 import com.daigan.record.data.local.dao.OwnerDao
 import com.daigan.record.data.local.dao.ReceiptDao
+import com.daigan.record.data.local.dao.ServerOptionDao
 import com.daigan.record.data.local.dao.TaskDao
 import com.daigan.record.data.local.dao.TemplateDao
 import com.daigan.record.data.local.di.DatabaseModule
@@ -69,6 +70,9 @@ object TestDatabaseModule {
     @Provides
     fun provideCreationOperationDao(database: RecordDatabase): CreationOperationDao =
         database.creationOperationDao()
+
+    @Provides
+    fun provideServerOptionDao(database: RecordDatabase): ServerOptionDao = database.serverOptionDao()
 
     @Provides
     fun provideTemplateDao(database: RecordDatabase): TemplateDao = database.templateDao()

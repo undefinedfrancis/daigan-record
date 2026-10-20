@@ -4,8 +4,10 @@ import androidx.room.withTransaction
 import com.daigan.record.core.time.PersistedInstant
 import com.daigan.record.core.time.TimeProvider
 import com.daigan.record.data.local.RecordDatabase
+import com.daigan.record.data.local.dao.ServerOptionDao
 import com.daigan.record.data.local.dao.TemplateDao
 import com.daigan.record.data.local.entity.GameTemplateEntity
+import com.daigan.record.data.local.entity.ServerOptionEntity
 import com.daigan.record.data.local.entity.TemplateCategoryEntity
 import com.daigan.record.data.local.entity.TemplateSeedStateEntity
 import com.daigan.record.data.local.entity.TemplateTaskEntity
@@ -93,6 +95,7 @@ interface GameTemplateRepository {
 class DefaultGameTemplateRepository @Inject constructor(
     private val database: RecordDatabase,
     private val templateDao: TemplateDao,
+    private val serverOptionDao: ServerOptionDao,
     private val builtInSource: BuiltInTemplateSource,
     private val timeProvider: TimeProvider,
 ) : GameTemplateRepository {
@@ -260,7 +263,7 @@ class DefaultGameTemplateRepository @Inject constructor(
         requireValid(normalized)
         val now = now()
         return database.withDatasetTransaction {
-            when (resolution) {
+            val imported = when (resolution) {
                 TemplateImportResolution.SaveAs -> {
                     val existingNames = templateDao.findAllTemplates().map { it.gameName }
                     val uniqueName = TemplateNames.uniqueGameName(
@@ -296,7 +299,24 @@ class DefaultGameTemplateRepository @Inject constructor(
                         replaced = true,
                     )
                 }
+            }.also { imported ->
+                // A file that carries 区服 options replaces that game's list (keyed by
+                // game name, independent of the template row). A legacy file with no
+                // options leaves the user's existing lists untouched.
+                if (content.serverOptions.isNotEmpty()) {
+                    val names = content.serverOptions.map { it.trim() }
+                    serverOptionDao.deleteForGame(imported.gameName)
+                    serverOptionDao.insertAll(names.mapIndexed { index, name ->
+                        ServerOptionEntity(
+                            id = UUID.randomUUID().toString(),
+                            gameName = imported.gameName,
+                            name = name,
+                            sortOrder = index,
+                        )
+                    })
+                }
             }
+            imported
         }
     }
 

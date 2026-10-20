@@ -36,6 +36,7 @@ import com.daigan.record.feature.settings.ReceiptHistoryScreen
 import com.daigan.record.feature.settings.ReminderSettingsScreen
 import com.daigan.record.feature.settings.SettingsScreen
 import com.daigan.record.feature.stats.StatsScreen
+import com.daigan.record.feature.templates.ServerOptionsScreen
 import com.daigan.record.feature.templates.TemplateEditorScreen
 import com.daigan.record.feature.templates.TemplateLibraryScreen
 import com.daigan.record.feature.today.TodayScreen
@@ -148,7 +149,11 @@ fun DaiganRecordApp(
                     onEditTemplate = { templateId ->
                         navController.navigate(Routes.templateEditor(templateId))
                     },
+                    onManageServerOptions = { navController.navigate(Routes.SERVER_OPTIONS) },
                 )
+            }
+            composable(Routes.SERVER_OPTIONS) {
+                ServerOptionsScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = Routes.TEMPLATE_EDITOR,

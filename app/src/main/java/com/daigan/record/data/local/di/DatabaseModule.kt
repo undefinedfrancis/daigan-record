@@ -14,6 +14,7 @@ import com.daigan.record.data.local.dao.ReceiptDao
 import com.daigan.record.data.local.dao.ReminderDeliveryDao
 import com.daigan.record.data.local.dao.ReminderSettingsDao
 import com.daigan.record.data.local.dao.AppSettingsDao
+import com.daigan.record.data.local.dao.ServerOptionDao
 import com.daigan.record.data.local.dao.TaskDao
 import com.daigan.record.data.local.dao.TemplateDao
 import dagger.Module
@@ -64,6 +65,9 @@ object DatabaseModule {
     @Provides
     fun provideCreationOperationDao(database: RecordDatabase): CreationOperationDao =
         database.creationOperationDao()
+
+    @Provides
+    fun provideServerOptionDao(database: RecordDatabase): ServerOptionDao = database.serverOptionDao()
 
     @Provides
     fun provideTemplateDao(database: RecordDatabase): TemplateDao = database.templateDao()

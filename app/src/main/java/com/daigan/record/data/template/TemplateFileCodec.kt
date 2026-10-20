@@ -45,6 +45,8 @@ data class TemplateFileContent(
     val draft: TemplateDraft,
     val categoryCount: Int,
     val taskCount: Int,
+    /** Per-game 区服 options carried by the file; empty when the field is absent. */
+    val serverOptions: List<String> = emptyList(),
 )
 
 /**
@@ -68,6 +70,10 @@ object TemplateFileCodec {
     /** Hard byte limit for a template file; also enforced while reading the stream. */
     const val MAX_FILE_BYTES = 256 * 1024
 
+    /** Per-game 区服 option limits, mirroring the account field's 60-character cap. */
+    const val MAX_SERVER_OPTIONS = 50
+    const val MAX_SERVER_OPTION_LENGTH = 60
+
     private val json = Json {
         prettyPrint = true
         isLenient = false
@@ -84,6 +90,7 @@ object TemplateFileCodec {
         "weeklyRefreshDay",
         "weeklyRefreshTime",
         "categories",
+        "serverOptions",
     )
     private val categoryKeys = setOf("id", "name", "tasks")
     private val taskKeys = setOf(
@@ -101,7 +108,12 @@ object TemplateFileCodec {
     )
     private val rootKeys = setOf("format", "formatVersion", "template")
 
-    fun encode(template: GameTemplate): ByteArray {
+    /**
+     * Encodes one template with its game's 区服 options. The options field is omitted
+     * when empty so pre-1.7 apps can still import option-less files; a non-empty list
+     * is written and rejected by strict old readers, which is intentional.
+     */
+    fun encode(template: GameTemplate, serverOptions: List<String> = emptyList()): ByteArray {
         val root = buildJsonObject {
             put("format", FORMAT_NAME)
             put("formatVersion", FORMAT_VERSION)
@@ -150,6 +162,11 @@ object TemplateFileCodec {
                                 }
                             },
                         )
+                    }
+                }
+                if (serverOptions.isNotEmpty()) {
+                    putJsonArray("serverOptions") {
+                        serverOptions.forEach { add(JsonPrimitive(it)) }
                     }
                 }
             }
@@ -201,6 +218,7 @@ object TemplateFileCodec {
         val dailyRefresh = parseTime(template.requireString("dailyRefresh"), "每日刷新时间")
         val weeklyDay = parseDay(template.requireString("weeklyRefreshDay"))
         val weeklyTime = parseTime(template.requireString("weeklyRefreshTime"), "每周刷新时间")
+        val serverOptions = parseServerOptions(template)
 
         val categoriesArray = template["categories"]
             ?.arrayOrThrow("categories 必须是数组")
@@ -280,7 +298,33 @@ object TemplateFileCodec {
             draft = draft,
             categoryCount = categories.size,
             taskCount = taskTotal,
+            serverOptions = serverOptions,
         )
+    }
+
+    /**
+     * Optional per-game 区服 options. An absent field means "the file carries none" and
+     * decodes to an empty list; present entries must be non-blank, unique and short.
+     */
+    private fun parseServerOptions(template: JsonObject): List<String> {
+        val array = template["serverOptions"] as? JsonArray ?: return emptyList()
+        if (array.size > MAX_SERVER_OPTIONS) {
+            throw TemplateFileException("区服选项数量超过 $MAX_SERVER_OPTIONS 个上限")
+        }
+        val options = array.mapIndexed { index, element ->
+            val text = (element as? JsonPrimitive)?.takeIf { it.isString }?.content
+                ?: throw TemplateFileException("第 ${index + 1} 个区服选项必须是文本")
+            val trimmed = text.trim()
+            if (trimmed.isEmpty()) throw TemplateFileException("区服选项不能为空")
+            if (trimmed.length > MAX_SERVER_OPTION_LENGTH) {
+                throw TemplateFileException("区服选项最多 $MAX_SERVER_OPTION_LENGTH 个字符")
+            }
+            trimmed
+        }
+        if (options.distinct().size != options.size) {
+            throw TemplateFileException("文件中的区服选项重复")
+        }
+        return options
     }
 
     private fun parseProgressType(raw: String): ProgressType = when (raw) {

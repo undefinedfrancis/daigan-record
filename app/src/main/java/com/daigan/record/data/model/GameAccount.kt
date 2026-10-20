@@ -26,6 +26,8 @@ data class GameAccount(
      * requires one.
      */
     val defaultTemplateId: String? = null,
+    /** Optional login device label (手机/平板/电脑/自定义); null on legacy accounts. */
+    val loginDevice: String? = null,
 ) {
     val hasStoredPassword: Boolean
         get() = loginMethod == LoginMethod.PASSWORD && !password.isNullOrEmpty()
@@ -41,6 +43,8 @@ data class AccountDraft(
     val password: String = "",
     /** Optional creation default for new orders; never required to use the account. */
     val defaultTemplateId: String? = null,
+    /** Optional login device (手机/平板/电脑/自定义); empty means unset. */
+    val loginDevice: String = "",
 ) {
     /**
      * Trims every text field and drops the password whenever the account uses
@@ -52,6 +56,7 @@ data class AccountDraft(
         uid = uid.trim(),
         loginAccount = loginAccount.trim(),
         password = if (loginMethod == LoginMethod.PASSWORD) password else "",
+        loginDevice = loginDevice.trim(),
     )
 
     /** Returns per-field Chinese error messages; empty means the draft is valid. */
@@ -69,6 +74,9 @@ data class AccountDraft(
         if (normalized.loginMethod == LoginMethod.PASSWORD && normalized.password.isBlank()) {
             errors[AccountField.PASSWORD] = "密码登录需要填写密码；如使用验证码登录请切换登录方式"
         }
+        if (normalized.loginDevice.length > MAX_TEXT_LENGTH) {
+            errors[AccountField.LOGIN_DEVICE] = "登录设备最多 $MAX_TEXT_LENGTH 个字符"
+        }
         return errors
     }
 
@@ -83,6 +91,7 @@ data class AccountDraft(
             loginMethod = account.loginMethod,
             password = account.password.orEmpty(),
             defaultTemplateId = account.defaultTemplateId,
+            loginDevice = account.loginDevice.orEmpty(),
         )
     }
 }
@@ -93,4 +102,5 @@ enum class AccountField {
     UID,
     LOGIN_ACCOUNT,
     PASSWORD,
+    LOGIN_DEVICE,
 }

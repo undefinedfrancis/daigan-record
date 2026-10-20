@@ -415,7 +415,11 @@ private fun AccountCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "登录信息 · " + if (account.hasStoredPassword) "账号密码" else "验证码登录",
+                    text = "登录信息 · " + when (account.loginMethod) {
+                        LoginMethod.PASSWORD -> "账号密码"
+                        LoginMethod.VERIFICATION_CODE -> "验证码登录"
+                        LoginMethod.QR_CODE -> "扫码登录"
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
@@ -437,6 +441,13 @@ private fun AccountCard(
                         }
                     },
                 )
+                account.loginDevice?.takeIf { it.isNotBlank() }?.let { device ->
+                    LabeledValue(
+                        label = "登录设备",
+                        value = device,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
                 if (account.loginMethod == LoginMethod.PASSWORD) {
                     LabeledValue(
                         label = "密码",
@@ -462,7 +473,10 @@ private fun AccountCard(
                     )
                 } else {
                     Text(
-                        text = "使用验证码登录，不保存验证码。",
+                        text = when (account.loginMethod) {
+                            LoginMethod.QR_CODE -> "使用扫码登录，应用只记录登录方式。"
+                            else -> "使用验证码登录，不保存验证码。"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),

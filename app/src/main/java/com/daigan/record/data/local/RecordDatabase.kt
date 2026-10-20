@@ -20,6 +20,7 @@ import com.daigan.record.data.local.dao.OwnerDao
 import com.daigan.record.data.local.dao.ReceiptDao
 import com.daigan.record.data.local.dao.ReminderDeliveryDao
 import com.daigan.record.data.local.dao.ReminderSettingsDao
+import com.daigan.record.data.local.dao.ServerOptionDao
 import com.daigan.record.data.local.dao.AppSettingsDao
 import com.daigan.record.data.local.dao.TaskDao
 import com.daigan.record.data.local.dao.TemplateDao
@@ -131,6 +132,8 @@ abstract class RecordDatabase : RoomDatabase() {
     abstract fun receiptDao(): ReceiptDao
 
     abstract fun creationOperationDao(): CreationOperationDao
+
+    abstract fun serverOptionDao(): ServerOptionDao
 
     abstract fun templateDao(): TemplateDao
 

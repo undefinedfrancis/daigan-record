@@ -25,6 +25,33 @@ import kotlinx.coroutines.flow.map
 
 val fixedInstant: Instant = Instant.parse("2026-10-17T02:00:00Z")
 
+/** In-memory per-game 区服 options with the same rules as the real repository. */
+class FakeServerOptionRepository : com.daigan.record.data.repository.ServerOptionRepository {
+    private val options = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+
+    override fun observeForGame(gameName: String): Flow<List<String>> =
+        options.map { it[gameName.trim()].orEmpty() }
+
+    override fun observeGameNames(): Flow<List<String>> = options.map { it.keys.sorted() }
+
+    override suspend fun setOptions(gameName: String, options: List<String>) {
+        this.options.value = this.options.value + (gameName.trim() to options.map(String::trim))
+    }
+
+    override suspend fun renameOption(gameName: String, oldName: String, newName: String) {
+        val current = options.value
+        val names = current[gameName.trim()].orEmpty()
+        options.value = current +
+            (gameName.trim() to names.map { if (it == oldName) newName.trim() else it })
+    }
+
+    override suspend fun removeOption(gameName: String, name: String) {
+        val current = options.value
+        val names = current[gameName.trim()].orEmpty()
+        options.value = current + (gameName.trim() to names.filterNot { it == name.trim() })
+    }
+}
+
 class FixedTimeProvider(private val instant: Instant = fixedInstant) : TimeProvider {
     override fun now(): Instant = instant
 }

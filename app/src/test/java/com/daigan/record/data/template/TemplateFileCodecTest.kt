@@ -92,6 +92,36 @@ class TemplateFileCodecTest {
         assertTrue(TemplateFileCodec.decode(TemplateFileCodec.encode(invalid)) is TemplateFileResult.Failure)
     }
 
+    @Test
+    fun `server options round trip with Chinese names`() {
+        val decoded = TemplateFileCodec.decode(
+            TemplateFileCodec.encode(template, serverOptions = listOf("官服", "B服")),
+        ) as TemplateFileResult.Success
+        assertEquals(listOf("官服", "B服"), decoded.content.serverOptions)
+    }
+
+    @Test
+    fun `legacy file without server options decodes to an empty list`() {
+        val bytes = mutateTemplate { templateObject ->
+            JsonObject(templateObject.filterKeys { it != "serverOptions" })
+        }
+        val decoded = TemplateFileCodec.decode(bytes) as TemplateFileResult.Success
+        assertEquals(emptyList<String>(), decoded.content.serverOptions)
+    }
+
+    @Test
+    fun `blank or oversized server options are rejected`() {
+        assertTrue(
+            TemplateFileCodec.decode(TemplateFileCodec.encode(template, serverOptions = listOf("  ")))
+                is TemplateFileResult.Failure,
+        )
+        assertTrue(
+            TemplateFileCodec.decode(
+                TemplateFileCodec.encode(template, serverOptions = listOf("区".repeat(61))),
+            ) is TemplateFileResult.Failure,
+        )
+    }
+
     private fun encoded(): String = String(TemplateFileCodec.encode(template), Charsets.UTF_8)
 
     private fun mutateJson(transform: (JsonObject) -> JsonObject): ByteArray {

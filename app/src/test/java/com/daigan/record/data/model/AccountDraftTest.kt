@@ -138,4 +138,78 @@ class AccountDraftTest {
         assertEquals("secret", draft.password)
         assertFalse(draft.validate().isNotEmpty())
     }
+
+    @Test
+    fun `qr code login never requires a password`() {
+        val draft = AccountDraft(
+            gameName = "鸣潮",
+            server = "国服",
+            uid = "10002136",
+            loginAccount = "demo",
+            loginMethod = LoginMethod.QR_CODE,
+            password = "",
+        )
+        assertFalse(draft.validate().isNotEmpty())
+    }
+
+    @Test
+    fun `qr code login drops any stored password like verification code`() {
+        val draft = AccountDraft(
+            gameName = "鸣潮",
+            server = "国服",
+            uid = "10002136",
+            loginAccount = "demo",
+            loginMethod = LoginMethod.QR_CODE,
+            password = "stale",
+        )
+        assertEquals("", draft.normalized().password)
+    }
+
+    @Test
+    fun `login device is optional and trimmed`() {
+        val base = AccountDraft(
+            gameName = "鸣潮",
+            server = "国服",
+            uid = "10002136",
+            loginAccount = "demo",
+            loginMethod = LoginMethod.QR_CODE,
+        )
+        assertFalse(base.validate().isNotEmpty())
+        val device = base.copy(loginDevice = "  平板  ")
+        assertEquals("平板", device.normalized().loginDevice)
+        assertFalse(device.validate().isNotEmpty())
+    }
+
+    @Test
+    fun `login device longer than the limit is rejected`() {
+        val draft = AccountDraft(
+            gameName = "鸣潮",
+            server = "国服",
+            uid = "10002136",
+            loginAccount = "demo",
+            loginMethod = LoginMethod.QR_CODE,
+            loginDevice = "设".repeat(AccountDraft.MAX_TEXT_LENGTH + 1),
+        )
+        val errors = draft.validate()
+        assertTrue(errors.containsKey(AccountField.LOGIN_DEVICE))
+    }
+
+    @Test
+    fun `from maps the stored login device`() {
+        val stored = GameAccount(
+            id = "account-1",
+            ownerId = "owner-1",
+            gameName = "鸣潮",
+            server = "国服",
+            uid = "10002136",
+            loginAccount = "demo",
+            loginMethod = LoginMethod.QR_CODE,
+            password = null,
+            createdAt = java.time.Instant.EPOCH,
+            archived = false,
+            archivedWithOwner = false,
+            loginDevice = "电脑",
+        )
+        assertEquals("电脑", AccountDraft.from(stored).loginDevice)
+    }
 }

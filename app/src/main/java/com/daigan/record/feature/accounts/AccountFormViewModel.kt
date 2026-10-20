@@ -9,21 +9,29 @@ import com.daigan.record.data.repository.ARCHIVED_OWNER_ACCOUNT_MESSAGE
 import com.daigan.record.data.repository.GameAccountRepository
 import com.daigan.record.data.repository.GameTemplateRepository
 import com.daigan.record.data.repository.OwnerRepository
+import com.daigan.record.data.repository.ServerOptionRepository
 import com.daigan.record.ui.navigation.Routes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AccountFormViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     ownerRepository: OwnerRepository,
     private val accountRepository: GameAccountRepository,
     private val templateRepository: GameTemplateRepository,
+    private val serverOptionRepository: ServerOptionRepository,
 ) : ViewModel() {
 
     private val ownerId: String = checkNotNull(savedStateHandle[Routes.OWNER_ID_ARG]) {
@@ -62,6 +70,21 @@ class AccountFormViewModel @Inject constructor(
                 )
             }
         }
+        viewModelScope.launch {
+            // 区服 options follow the typed game name; an empty name shows the free-text
+            // field only. Renaming or removing options never touches stored accounts.
+            _uiState
+                .map { it.draft.gameName.trim() }
+                .distinctUntilChanged()
+                .flatMapLatest { name ->
+                    if (name.isBlank()) {
+                        flowOf(emptyList())
+                    } else {
+                        serverOptionRepository.observeForGame(name)
+                    }
+                }
+                .collect { options -> _uiState.update { it.copy(serverOptions = options) } }
+        }
     }
 
     /**
@@ -99,14 +122,14 @@ class AccountFormViewModel @Inject constructor(
     }
 
     /**
-     * Switching to verification-code login also drops the in-memory password so the
+     * Switching to a non-password login also drops the in-memory password so the
      * submitted draft can never carry a stale credential.
      */
     fun selectLoginMethod(method: LoginMethod) {
         _uiState.update { state ->
             val draft = state.draft.copy(loginMethod = method)
             state.copy(
-                draft = if (method == LoginMethod.VERIFICATION_CODE) draft.copy(password = "") else draft,
+                draft = if (method == LoginMethod.PASSWORD) draft else draft.copy(password = ""),
                 errors = emptyMap(),
                 saveError = null,
             )
