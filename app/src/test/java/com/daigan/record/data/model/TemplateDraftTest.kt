@@ -31,6 +31,7 @@ class TemplateDraftTest {
                 tasks = listOf(TemplateTaskDraft(id = "task-1", title = "每日签到")),
             ),
         ),
+        pricePresets: List<TemplatePricePresetDraft> = emptyList(),
     ) = TemplateDraft(
         gameName = "重返未来：1999",
         templateVersion = "2026.10",
@@ -39,6 +40,7 @@ class TemplateDraftTest {
         weeklyRefreshDay = DayOfWeek.MONDAY,
         weeklyRefreshTime = LocalTime.of(5, 0),
         categories = categories,
+        pricePresets = pricePresets,
     )
 
     @Test
@@ -170,6 +172,81 @@ class TemplateDraftTest {
             )
         }
         assertTrue(draft(categories = manyCategories).validate().containsKey("categories"))
+    }
+
+    @Test
+    fun `price preset with two decimals is accepted and maps to exact cents`() {
+        val preset = TemplatePricePresetDraft(amountText = "12.50")
+        assertEquals(emptyMap<String, String>(), draft(pricePresets = listOf(preset)).validate())
+        assertEquals(1250L, preset.amountCentsOrNull())
+        assertEquals(1250L, TemplatePricePresetDraft(amountText = "12.5").amountCentsOrNull())
+    }
+
+    @Test
+    fun `blank or unparsable price presets are rejected`() {
+        assertTrue(
+            draft(pricePresets = listOf(TemplatePricePresetDraft(amountText = "")))
+                .validate()["pricePreset.0.amount"] == "请填写预设价格",
+        )
+        assertTrue(
+            draft(pricePresets = listOf(TemplatePricePresetDraft(amountText = "1.234")))
+                .validate()["pricePreset.0.amount"] == "金额需为不超过两位小数的非负数字",
+        )
+        assertTrue(
+            draft(pricePresets = listOf(TemplatePricePresetDraft(amountText = "-1")))
+                .validate().containsKey("pricePreset.0.amount"),
+        )
+    }
+
+    @Test
+    fun `duplicate price presets are rejected by cents not by text`() {
+        val errors = draft(
+            pricePresets = listOf(
+                TemplatePricePresetDraft(amountText = "10"),
+                TemplatePricePresetDraft(amountText = "10.00"),
+            ),
+        ).validate()
+        assertEquals("价格预设不能重复", errors["pricePresets"])
+
+        assertEquals(
+            emptyMap<String, String>(),
+            draft(
+                pricePresets = listOf(
+                    TemplatePricePresetDraft(amountText = "10"),
+                    TemplatePricePresetDraft(amountText = "20"),
+                ),
+            ).validate(),
+        )
+    }
+
+    @Test
+    fun `price preset labels and counts are limited`() {
+        val longLabel = draft(
+            pricePresets = listOf(
+                TemplatePricePresetDraft(amountText = "10", label = "价".repeat(21)),
+            ),
+        ).validate()
+        assertEquals("价格预设名称最多 20 个字符", longLabel["pricePreset.0.label"])
+
+        val many = (1..TemplateDraft.MAX_PRICE_PRESETS + 1).map { index ->
+            TemplatePricePresetDraft(amountText = index.toString())
+        }
+        assertTrue(draft(pricePresets = many).validate().containsKey("pricePresets"))
+    }
+
+    @Test
+    fun `a template without price presets stays valid and an existing template round trips`() {
+        assertEquals(emptyMap<String, String>(), draft().validate())
+        val template = TemplateFixtures.template(
+            pricePresets = listOf(
+                TemplateFixtures.pricePreset(id = "p-1", amountCents = 1250L, label = "日常价"),
+            ),
+        )
+        assertEquals(
+            listOf("12.50" to "日常价"),
+            TemplateDraft.from(template).pricePresets.map { it.amountText to it.label },
+        )
+        assertEquals(emptyMap<String, String>(), TemplateDraft.from(template).validate())
     }
 
     @Test

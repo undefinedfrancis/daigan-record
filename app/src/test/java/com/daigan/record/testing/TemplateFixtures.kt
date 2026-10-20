@@ -6,6 +6,7 @@ import com.daigan.record.data.model.ProgressType
 import com.daigan.record.data.model.RecurrenceType
 import com.daigan.record.data.model.TemplateCategory
 import com.daigan.record.data.model.TemplateOrigin
+import com.daigan.record.data.model.TemplatePricePreset
 import com.daigan.record.data.model.TemplateTask
 import java.math.BigDecimal
 import java.time.DayOfWeek
@@ -28,6 +29,7 @@ object TemplateFixtures {
         categories: List<TemplateCategory> = listOf(
             category(templateId = id, id = "category-1", name = "日常"),
         ),
+        pricePresets: List<TemplatePricePreset> = emptyList(),
     ): GameTemplate = GameTemplate(
         id = id,
         gameName = gameName,
@@ -44,6 +46,7 @@ object TemplateFixtures {
         createdAt = fixedInstant,
         updatedAt = fixedInstant,
         categories = categories,
+        pricePresets = pricePresets,
     )
 
     fun category(
@@ -92,6 +95,18 @@ object TemplateFixtures {
         recurrence = recurrence,
         weekdays = weekdays,
         everyNDays = everyNDays,
+        sortOrder = sortOrder,
+    )
+
+    fun pricePreset(
+        id: String,
+        amountCents: Long,
+        label: String? = null,
+        sortOrder: Int = 0,
+    ): TemplatePricePreset = TemplatePricePreset(
+        id = id,
+        amountCents = amountCents,
+        label = label,
         sortOrder = sortOrder,
     )
 }

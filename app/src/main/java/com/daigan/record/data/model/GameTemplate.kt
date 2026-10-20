@@ -50,6 +50,20 @@ data class TemplateTask(
 }
 
 /**
+ * One saved price option of a template, stored in integer cents.
+ *
+ * A preset is a **creation default**, exactly like a template task: an order copies the
+ * chosen amount at creation and keeps no reference back to this row. Editing or deleting
+ * a preset therefore can never rewrite the price of an order that already exists.
+ */
+data class TemplatePricePreset(
+    val id: String,
+    val amountCents: Long,
+    val label: String? = null,
+    val sortOrder: Int = 0,
+)
+
+/**
  * A persisted, editable template. Categories and tasks are ordered snapshots owned by
  * the template; no order ever references these rows, so editing or deleting a template
  * cannot rewrite an existing order.
@@ -68,6 +82,8 @@ data class GameTemplate(
     val categories: List<TemplateCategory>,
     /** Stable library display order; built-ins are 0, 1, 2 in preparation order. */
     val sortOrder: Int = 0,
+    /** Optional per-template price options offered as a dropdown when creating an order. */
+    val pricePresets: List<TemplatePricePreset> = emptyList(),
 ) {
     val tasks: List<TemplateTask> get() = categories.flatMap { it.tasks }
 
@@ -115,6 +131,8 @@ data class TemplateDraft(
     val weeklyRefreshDay: DayOfWeek = DayOfWeek.MONDAY,
     val weeklyRefreshTime: LocalTime = LocalTime.of(5, 0),
     val categories: List<TemplateCategoryDraft> = listOf(TemplateCategoryDraft()),
+    /** Optional price options the order form offers as a dropdown. Empty is valid. */
+    val pricePresets: List<TemplatePricePresetDraft> = emptyList(),
 ) {
     val taskCount: Int get() = categories.sumOf { it.tasks.size }
     val hostingTaskCount: Int
@@ -131,6 +149,7 @@ data class TemplateDraft(
         gameVersionNotes = gameVersionNotes.trim(),
         zoneText = zoneText.trim(),
         categories = categories.map { it.normalized() },
+        pricePresets = pricePresets.map { it.normalized() },
     )
 
     /**
@@ -168,6 +187,26 @@ data class TemplateDraft(
                 task.validate("category.$index.task.$taskIndex", errors)
             }
         }
+        if (draft.pricePresets.size > MAX_PRICE_PRESETS) {
+            errors["pricePresets"] = "最多 $MAX_PRICE_PRESETS 个价格预设"
+        }
+        // Duplicates are compared by cents, not by text: "10" and "10.00" are the same
+        // preset, and a dropdown with two identical amounts is unusable.
+        val seenCents = mutableSetOf<Long>()
+        draft.pricePresets.forEachIndexed { index, preset ->
+            val key = "pricePreset.$index.amount"
+            if (preset.amountText.isEmpty()) {
+                errors[key] = "请填写预设价格"
+            } else if (preset.amountCentsOrNull() == null) {
+                errors[key] = "金额需为不超过两位小数的非负数字"
+            } else if (!seenCents.add(preset.amountCentsOrNull()!!)) {
+                errors["pricePresets"] = "价格预设不能重复"
+            }
+            if (preset.label.length > MAX_PRICE_PRESET_LABEL_LENGTH) {
+                errors["pricePreset.$index.label"] =
+                    "价格预设名称最多 $MAX_PRICE_PRESET_LABEL_LENGTH 个字符"
+            }
+        }
         return errors
     }
 
@@ -178,6 +217,7 @@ data class TemplateDraft(
                 tasks = category.tasks.map { it.copy(id = UUID.randomUUID().toString()) },
             )
         },
+        pricePresets = pricePresets.map { it.copy(id = UUID.randomUUID().toString()) },
     )
 
     companion object {
@@ -189,6 +229,8 @@ data class TemplateDraft(
         const val MAX_CATEGORY_NAME_LENGTH = 30
         const val MAX_TASK_TITLE_LENGTH = 40
         const val MAX_UNIT_LENGTH = 10
+        const val MAX_PRICE_PRESETS = 20
+        const val MAX_PRICE_PRESET_LABEL_LENGTH = 20
 
         fun from(template: GameTemplate): TemplateDraft = TemplateDraft(
             gameName = template.gameName,
@@ -218,6 +260,15 @@ data class TemplateDraft(
                     },
                 )
             },
+            pricePresets = template.pricePresets
+                .sortedBy { it.sortOrder }
+                .map { preset ->
+                    TemplatePricePresetDraft(
+                        id = preset.id,
+                        amountText = Money.centsToYuanText(preset.amountCents),
+                        label = preset.label.orEmpty(),
+                    )
+                },
         )
     }
 }
@@ -314,6 +365,23 @@ data class TemplateTaskDraft(
         fun parseDecimal(raw: String): BigDecimal? =
             runCatching { BigDecimal(raw.trim()) }.getOrNull()
     }
+}
+
+/**
+ * One editable price option in the template editor. The text is kept verbatim so a
+ * half-typed amount never silently rounds; validation runs on [normalized].
+ */
+data class TemplatePricePresetDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val amountText: String = "",
+    val label: String = "",
+) {
+    fun amountCentsOrNull(): Long? = Money.parseYuanToCentsOrNull(amountText)
+
+    fun normalized(): TemplatePricePresetDraft = copy(
+        amountText = amountText.trim(),
+        label = label.trim(),
+    )
 }
 
 /** Why a template cannot supply defaults for the chosen order type. */
