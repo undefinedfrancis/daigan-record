@@ -10,9 +10,9 @@
 
 `app_settings` 是本机身份及恢复提交标记，恢复时产生新身份；`reminder_deliveries` 是可重建的本机通知去重状态，恢复时清空。两表明确列入本地专用目录，不导出。提醒开关和时间与业务数据处于同一 Room 事务中恢复。
 
-v1.6 当前数据库 schema 为 8。可恢复 schema 8 及上一版 schema 7 的完整备份：仅为旧结构补齐 `orders.cancelledAt`、`task_definitions.monthDay` 和 `template_tasks.monthDay` 三个 NULL 列，其余列、表、类型和校验要求保持严格。其他 schema、未知格式或信封版本在替换前拒绝。schema 8 的备份不能在旧版应用中恢复。
+v1.7 当前数据库 schema 为 9（并行扩展交付再增至 10）。可恢复 schema 7 至当前版本的完整备份：旧结构补齐缺失列的 NULL 值（v1.6 的 `orders.cancelledAt`、`task_definitions.monthDay`、`template_tasks.monthDay`，v1.7 的 `game_accounts.loginDevice`），旧文件中没有的新表按空表补齐（`game_server_options`、`order_price_changes`，以及扩展交付的模板价格预设表）。其余列、表、类型和校验要求保持严格；清单中的表名集合允许缺少上述新表，但拒绝未知表名。其他 schema、未知格式或信封版本在替换前拒绝。旧 schema 的备份不能在旧版应用中恢复新备份。
 
-schema 8 备份保留订单作废标记及每月日号；作废不删除历史打卡、附件和收款。
+各代备份保留订单作废标记、每月日号、登录设备、区服选项与价格修改审计；作废与改价都不删除历史打卡、附件、收款流水与更正审计。改价审计行随订单删除路径一并清理，不产生孤立记录。
 
 ## 可选加密信封
 

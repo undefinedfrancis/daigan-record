@@ -14,11 +14,16 @@ Schema 导出位置：`app/schemas/com.daigan.record.data.local.RecordDatabase/`
 | 4 | `4.json` | 历史版本：Phase 3 首版收款表 |
 | 5 | `5.json` | 历史版本：Phase 3 验收基线 |
 | 6 | `6.json` | 只读历史版本（Phase 4 模板库与来源列） |
-| 7 | `7.json` | 当前版本（提醒设置、投递记录、本机资料身份） |
+| 7 | `7.json` | 历史版本（提醒设置、投递记录、本机资料身份） |
+| 8 | `8.json` | 历史版本（v1.6：作废标记与每月日号） |
+| 9 | `9.json` | v1.7：登录设备、区服选项、价格修改审计 |
+
+后续版本由并行的 v1.7 扩展交付继续追加（例如 9→10 的模板价格预设表），
+以导出 JSON 文件为准。
 
 `exportSchema = true`，没有 `fallbackToDestructiveMigration`。生产构建通过
-`RecordDatabase.ALL_MIGRATIONS` 注册 `MIGRATION_1_2`、`MIGRATION_2_3`、
-`MIGRATION_3_4`、`MIGRATION_4_5`、`MIGRATION_5_6` 与 `MIGRATION_6_7`。
+`RecordDatabase.ALL_MIGRATIONS` 注册 `MIGRATION_1_2` 至 `MIGRATION_8_9`
+（以及后续增量迁移）。
 
 类型转换器：
 
@@ -52,8 +57,9 @@ Schema 导出位置：`app/schemas/com.daigan.record.data.local.RecordDatabase/`
 | `id` | TEXT | 主键 |
 | `ownerId` | TEXT | → `owners.id`，`ON DELETE RESTRICT` |
 | `gameName` / `server` / `uid` / `loginAccount` | TEXT | 非空 |
-| `loginMethod` | TEXT | `PASSWORD` / `VERIFICATION_CODE` |
-| `password` | TEXT | 可空；验证码登录必须为 NULL |
+| `loginMethod` | TEXT | `PASSWORD` / `VERIFICATION_CODE` / `QR_CODE` |
+| `password` | TEXT | 可空；验证码/扫码登录必须为 NULL |
+| `loginDevice` | TEXT | 可空；登录设备（手机/平板/电脑/自定义），v1.7 新增 |
 | `createdAt` / `updatedAt` | INTEGER | 非空 |
 | `archivedAt` | INTEGER | 可空 |
 | `archiveBatchId` | TEXT | 可空；仅随老板归档时写入 |
@@ -613,3 +619,39 @@ interface TemplateFileRepository {
 恢复提交在一个 Room 事务里整体删除/重建业务行和提醒设置，并写入新的本机 datasetInstanceId 和 lastRestoreId；文件系统使用阶段日志与目录重命名配合。启动恢复成功前页面及 Worker 不开放。MainActivity 按资料身份重建导航，拒绝恢复旧资料的 Activity 状态。损坏恢复日志及未完成的回滚会锁定资料并提供重试，不自动清库。
 
 参见 `docs/backup-format.md`、`docs/backup-recovery.md`、`docs/reminder-behavior.md`。迁移验证入口 `MigrationV6ToV7Test`，包括旧业务表逐列保留、全历史 schema 链及新旧建库设置一致性。
+
+## 11. v1.7（schema 9）：登录设备、区服选项、价格修改审计
+
+迁移 `MIGRATION_8_9` 只做加法：`game_accounts` 增加可空 `loginDevice`，并新建两张表。
+历史账号的设备列为 NULL，两张新表从空开始，任何历史业务行都不改写。
+
+### `game_server_options` — 按游戏的区服选项（UF-005）
+
+| 列 | 类型 | 约束 |
+|---|---|---|
+| `id` | TEXT | 主键 |
+| `gameName` | TEXT | 非空；**按游戏名键控**，不设模板外键 |
+| `name` | TEXT | 非空；≤ 60 字符 |
+| `sortOrder` | INTEGER | 非空；同游戏内顺序 |
+
+索引 `(gameName, sortOrder)`。选项在模板区「区服选项」维护，填账号时点选；
+重命名或删除选项**不触碰** `game_accounts.server`（账号保存的是用户实际填写值）。
+模板交换文件可选携带 `serverOptions` 列表：导入时替换同名游戏的选项，文件不含
+该字段（旧文件）时保持用户已有选项不动。
+
+### `order_price_changes` — 约定价格修改审计（UF-012）
+
+| 列 | 类型 | 约束 |
+|---|---|---|
+| `id` | TEXT | 主键 |
+| `operationId` | TEXT | 唯一索引；改价命令幂等键 |
+| `orderId` | TEXT | → `orders.id`，`RESTRICT` |
+| `periodId` | TEXT | 可空 → `hosting_periods.id`，`RESTRICT`；托管期次改价必填 |
+| `previousPriceCents` / `newPriceCents` | INTEGER | 非空 |
+| `reason` | TEXT | 可空；≤ 200 字符 |
+| `createdAt` | INTEGER | 非空 |
+
+改价**绝不改写**收款流水：`receipts` 与 `receipt_corrections` 保持原样。
+改价后若有效收款超过新价格，`Money.remainingCents` 归零、`overpaidCents` 报告
+多收金额，界面显式展示「多收」。删除订单/账号的清理路径必须先删审计行
+（RESTRICT 外键）。
