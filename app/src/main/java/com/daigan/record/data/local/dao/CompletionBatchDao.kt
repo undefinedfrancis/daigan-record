@@ -16,6 +16,25 @@ interface CompletionBatchDao {
     @Insert
     suspend fun insertItems(items: List<CompletionBatchItemEntity>)
 
+    /** Cascade deletes for order/account deletion, in dependency order. */
+    @Query(
+        "DELETE FROM completion_batch_items WHERE taskDefinitionId IN " +
+            "(SELECT id FROM task_definitions WHERE orderId = :orderId) " +
+            "OR occurrenceId IN (SELECT occ.id FROM task_occurrences occ " +
+            "INNER JOIN task_definitions t ON t.id = occ.taskDefinitionId WHERE t.orderId = :orderId)",
+    )
+    suspend fun deleteItemsForOrder(orderId: String)
+
+    @Query("DELETE FROM completion_batches WHERE targetId = :orderId")
+    suspend fun deleteBatchesForOrder(orderId: String)
+
+    /** HOSTING_ALL batches spanning several orders keep surviving items; empty ones go. */
+    @Query(
+        "DELETE FROM completion_batches WHERE scope = 'HOSTING_ALL' AND " +
+            "id NOT IN (SELECT batchId FROM completion_batch_items)",
+    )
+    suspend fun deleteEmptyHostingAllBatches()
+
     @Query("SELECT * FROM completion_batches WHERE id = :batchId")
     suspend fun findById(batchId: String): CompletionBatchEntity?
 

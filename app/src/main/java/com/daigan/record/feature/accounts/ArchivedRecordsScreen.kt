@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -19,17 +20,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.daigan.record.data.model.ArchivedAccount
+import com.daigan.record.data.model.Money
 import com.daigan.record.data.model.OwnerSummary
+import com.daigan.record.data.repository.OwnerDeletionImpact
 import com.daigan.record.ui.components.EmptyStateCard
 import com.daigan.record.ui.components.PageHeader
 import com.daigan.record.ui.components.StatusTag
@@ -42,6 +47,8 @@ fun ArchivedRecordsScreen(
     viewModel: ArchivedRecordsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val deletionImpact by viewModel.deletionImpact.collectAsStateWithLifecycle()
+    val deletionInFlight by viewModel.deletionInFlight.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -55,6 +62,11 @@ fun ArchivedRecordsScreen(
         onRestoreAccount = viewModel::restoreAccount,
         snackbarHostState = snackbarHostState,
         modifier = modifier,
+        onDeleteOwner = viewModel::requestOwnerDeletion,
+        deletionImpact = deletionImpact,
+        deletionInFlight = deletionInFlight,
+        onConfirmDeleteOwner = viewModel::confirmOwnerDeletion,
+        onCancelDeleteOwner = viewModel::cancelOwnerDeletion,
     )
 }
 
@@ -66,6 +78,11 @@ internal fun ArchivedRecordsScreen(
     onRestoreAccount: (String) -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    onDeleteOwner: (String) -> Unit = {},
+    deletionImpact: OwnerDeletionImpact? = null,
+    deletionInFlight: Boolean = false,
+    onConfirmDeleteOwner: () -> Unit = {},
+    onCancelDeleteOwner: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -103,9 +120,62 @@ internal fun ArchivedRecordsScreen(
                     accounts = uiState.archivedAccounts,
                     onRestoreOwner = onRestoreOwner,
                     onRestoreAccount = onRestoreAccount,
+                    onDeleteOwner = onDeleteOwner,
                 )
             }
         }
+    }
+
+    deletionImpact?.let { impact ->
+        AlertDialog(
+            onDismissRequest = { if (!deletionInFlight) onCancelDeleteOwner() },
+            title = { Text("删除老板「${impact.ownerNickname}」？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("将永久删除该老板及其全部关联数据，无法撤销：")
+                    Text("· 游戏账号 ${impact.accountCount} 个", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "· 订单 ${impact.orderCount} 个（其中未作废 ${impact.activeOrderCount} 个）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "· 打卡记录 ${impact.occurrenceCount} 条" +
+                            if (impact.sessionCount > 0) "、打卡轮次 ${impact.sessionCount} 轮" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "· 收款 ${impact.receiptCount} 笔，有效合计 " +
+                            Money.formatCents(impact.receiptSumCents) + "（删除后不再计入收入）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "· 未结清欠款 " + Money.formatCents(impact.outstandingCents) +
+                            "（删除后不再计入账单）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "· 截图 ${impact.attachmentCount} 张",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "其他老板、账号与订单不受影响。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !deletionInFlight, onClick = onConfirmDeleteOwner) {
+                    Text(if (deletionInFlight) "删除中…" else "确认删除")
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !deletionInFlight, onClick = onCancelDeleteOwner) {
+                    Text("取消")
+                }
+            },
+        )
     }
 }
 
@@ -115,6 +185,7 @@ private fun ArchivedList(
     accounts: List<ArchivedAccount>,
     onRestoreOwner: (String) -> Unit,
     onRestoreAccount: (String) -> Unit,
+    onDeleteOwner: (String) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -148,11 +219,23 @@ private fun ArchivedList(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
                         )
-                        Button(
-                            onClick = { onRestoreOwner(summary.owner.id) },
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(top = 8.dp),
                         ) {
-                            Text("恢复老板")
+                            Button(onClick = { onRestoreOwner(summary.owner.id) }) {
+                                Text("恢复老板")
+                            }
+                            // UF-031: deletion does not require restoring first; the
+                            // confirmation lists the real affected records and money.
+                            TextButton(
+                                onClick = { onDeleteOwner(summary.owner.id) },
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .testTag("archived-owner-delete"),
+                            ) {
+                                Text("删除")
+                            }
                         }
                     }
                 }

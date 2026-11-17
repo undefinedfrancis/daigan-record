@@ -1,8 +1,8 @@
 package com.daigan.record.core.time
 
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.DayOfWeek
 import java.time.LocalTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -11,6 +11,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GameCalendarTest {
+
+    @Test
+    fun `cumulative hosting days count only selected weekdays`() {
+        val start = LocalDate.of(2026, 10, 16) // Friday
+        assertEquals(
+            LocalDate.of(2026, 10, 21),
+            GameCalendar.hostingEndDateForWeekdays(start, 3, setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY)),
+        )
+    }
 
     private val shanghai = GameRefreshRules(
         zoneId = ZoneId.of("Asia/Shanghai"),

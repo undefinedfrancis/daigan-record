@@ -70,8 +70,19 @@ class Phase2ManualProbeTest {
                 database.orderDao(), fixed,
             )
             val accountRepository = DefaultGameAccountRepository(
-                database, database.ownerDao(), database.gameAccountDao(),
-                database.orderDao(), fixed,
+                database = database,
+                ownerDao = database.ownerDao(),
+                accountDao = database.gameAccountDao(),
+                orderDao = database.orderDao(),
+                taskDao = database.taskDao(),
+                occurrenceDao = database.occurrenceDao(),
+                receiptDao = database.receiptDao(),
+                attachmentDao = database.attachmentDao(),
+                completionBatchDao = database.completionBatchDao(),
+                categoryDao = database.accountCategoryDao(),
+                timeProvider = fixed,
+                // Probe-only seeding; it never deletes an account, so files stay put.
+                attachmentCleanup = com.daigan.record.data.repository.AttachmentFileCleanup { 0 },
             )
             val receiptLedger = com.daigan.record.data.repository.ReceiptLedger(
                 receiptDao = database.receiptDao(),
@@ -90,6 +101,19 @@ class Phase2ManualProbeTest {
                 receiptDao = database.receiptDao(),
                 receiptLedger = receiptLedger,
                 creationOperationDao = database.creationOperationDao(),
+                hostingSessionDao = database.hostingSessionDao(),
+                eventDao = database.taskProgressEventDao(),
+                countSessions = com.daigan.record.data.repository.DefaultCountSessionService(
+                    db = database,
+                    orderDao = database.orderDao(),
+                    taskDao = database.taskDao(),
+                    occurrenceDao = database.occurrenceDao(),
+                    eventDao = database.taskProgressEventDao(),
+                    sessionDao = database.hostingSessionDao(),
+                    accountDao = database.gameAccountDao(),
+                    ownerDao = database.ownerDao(),
+                    timeProvider = fixed,
+                ),
                 ticker = ticker,
             )
             val attachmentRepository = DefaultAttachmentRepository(

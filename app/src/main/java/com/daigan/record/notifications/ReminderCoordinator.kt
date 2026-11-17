@@ -41,7 +41,7 @@ class ReminderCoordinator @Inject constructor(
         scheduleMutex.withLock {
             val settings = settingsRepository.load()
             val now = timeProvider.now()
-            val eligible = ReminderEvaluator.messages(reminderRepository.loadSnapshot(), now)
+            val eligible = ReminderEvaluator.messages(reminderRepository.loadSnapshot(now), now)
             ReminderCategory.entries.filter { !settings.enabled(it) || it !in eligible }.forEach(notifier::cancel)
             scheduler.scheduleAll(settings, now)
         }
@@ -77,7 +77,7 @@ class ReminderCoordinator @Inject constructor(
                 if (minutes >= settings.minutes(category) &&
                     !reminderRepository.alreadyDelivered(category, day)
                 ) {
-                    val snapshot = reminderRepository.loadSnapshot()
+                    val snapshot = reminderRepository.loadSnapshot(now)
                     val message = ReminderEvaluator.messages(snapshot, now)[category]
                     if (message == null) notifier.cancel(category)
                     if (message != null && notifier.post(message)) {

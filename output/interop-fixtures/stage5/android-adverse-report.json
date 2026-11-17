@@ -1,0 +1,99 @@
+[
+    {
+        "case": "wrong-password",
+        "rejected": true,
+        "message": "密码不正确，或备份文件已被修改。",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "wrong-password-unicode",
+        "rejected": true,
+        "message": "密码不正确，或备份文件已被修改。",
+        "expectedMessageFragment": "密码",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "tampered-encrypted",
+        "rejected": true,
+        "message": "密码不正确，或备份文件已被修改。",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "missing-attachment",
+        "rejected": true,
+        "message": "备份缺少截图文件「c5c2bd5d-10a1-4be5-b75c-6450c7fbe1a6.jpg」，无法恢复。",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "tampered-attachment",
+        "rejected": true,
+        "message": "备份中的截图「c5c2bd5d-10a1-4be5-b75c-6450c7fbe1a6.jpg」校验失败，文件可能已损坏。",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "unsupported-schema-16",
+        "rejected": true,
+        "message": "该备份来自数据版本 16，当前应用只支持版本 15，无法恢复。",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "invalid-session-ownership",
+        "rejected": true,
+        "message": "备份中的累计事件不合法（SCOPE_OWNERSHIP_INVALID，事件 cf0619a2-6e80-47ad-b149-06aff22e2eb3，eventId=cf0619a2-6e80-47ad-b149-06aff22e2eb3 taskDefinitionId=411235d9-073c-45a5-a4c9-a84051460495 orderId=df3d6c7f-d01d-4bc4-8b5d-bc1ee1da77ff periodId=aa3a8961-84c7-4e50-9b99-a3fda2ef70b1 sessionId=session-of-another-order）：scope 轮次 session-of-another-order 不属于订单 df3d6c7f-d01d-4bc4-8b5d-bc1ee1da77ff",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "invalid-batch-reference",
+        "rejected": true,
+        "message": "备份的数据表「completion_batch_items」的引用关系不成立，无法恢复（数据未写入本机）。",
+        "expectedMessageFragment": "",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "cd01-undone-dangling-target",
+        "rejected": true,
+        "message": "批量完成的历史目标无法安全表示：UNDONE_BATCH_TARGET_DANGLING(itemId=fb9c08b1-b245-4747-adb6-9823d7fe932b, batchId=1cadd42c-03c1-4daf-aad4-87afb94ef31e, originalOccurrenceId=deleted-occurrence-original-123, taskDefinitionId=cb61b72a-1030-4918-8842-406edc537e64): 已撤销批次 1cadd42c-03c1-4daf-aad4-87afb94ef31e 的明细 fb9c08b1-b245-4747-adb6-9823d7fe932b 引用了已不存在的打卡记录 deleted-occurrence-original-123；原目标 id 无法在两端持久化，整份归档被拒绝（不",
+        "expectedMessageFragment": "UNDONE_BATCH_TARGET_DANGLING",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "write-failure-before-activation",
+        "rejected": true,
+        "message": "injected IOException at FILES_SWAPPED",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    },
+    {
+        "case": "stale-command-after-replacement",
+        "rejected": true,
+        "message": "资料已被恢复替换，请重新打开页面后操作",
+        "liveDatasetPreserved": true,
+        "sourceBytesUnchanged": true,
+        "platform": "android-emulator"
+    }
+]

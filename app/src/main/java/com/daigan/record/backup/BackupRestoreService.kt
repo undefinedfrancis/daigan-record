@@ -46,6 +46,19 @@ data class RestorePreview(
     val recordCount: Int,
     val remindersEnabled: Int,
     val empty: Boolean,
+    /** 恢复期由权威记录重建的轮次完成数（写入/重开的轮次合计）。 */
+    val derivedSessionsRebuilt: Int = 0,
+    /** 恢复期刷新的累计任务缓存数。 */
+    val derivedTaskCaches: Int = 0,
+    /** 重建过程中不影响激活的说明（对象级）。 */
+    val derivedNotes: List<String> = emptyList(),
+    /**
+     * 归一化阶段的对象级说明（例如历史分类默认值被固化）。默认空列表以便既有调用方不受影响。
+     *
+     * CD-01 的拒绝不走这里：已撤销批次的**已知但悬空**目标会让 `prepare` 抛出
+     * 对象级诊断（`UNDONE_BATCH_TARGET_DANGLING`，含原 id），不会产生"改写说明"。
+     */
+    val normalizerNotes: List<String> = emptyList(),
 )
 
 enum class RecoveryOutcome {
@@ -109,6 +122,7 @@ class BackupRestoreService @Inject constructor(
         var extracted: ExtractedArchive? = null,
         var dataSet: BackupDataSet? = null,
         var stagingDatabase: String? = null,
+        var reconstruction: DerivedStateReconstructor.Report? = null,
     )
 
     /** Test barriers also support external process-kill probes; unset in production. */
@@ -198,10 +212,20 @@ class BackupRestoreService @Inject constructor(
             storage.requireSpaceFor(
                 extracted.uncompressedBytes * 2 + active.archive.length() * 2,
             )
-            val dataSet = BackupDataCodec.decode(
+            val decoded = BackupDataCodec.decode(
                 extracted.dataBytes.toString(Charsets.UTF_8),
+                extracted.manifest.schemaVersion,
             )
-            verifyCounts(dataSet, extracted.manifest)
+            // 行数校验必须针对**文件本身**：规范化会新增 hosting_sessions 行。
+            verifyCounts(decoded, extracted.manifest)
+            // 规范化在写入候选库之前完成，且只做确定性映射；任何对象级诊断都会在这里
+            // 抛出，当前数据集保持可用。
+            val normalized = BackupNormalizer.normalize(decoded, extracted.manifest.schemaVersion)
+            // S2-R3：导入的缓存与投影一律不可信。轮次完成度、累计任务缓存与订单完成
+            // 全部由权威记录（事件 + occurrence 历史 + 应做集）重建，然后再交给
+            // staging 校验。失败同样在写入 live 数据集之前抛出。
+            val reconstructed = DerivedStateReconstructor.reconstruct(normalized.dataSet)
+            val dataSet = reconstructed.dataSet
 
             val stagingName = "restore-staging-${active.id}"
             active.stagingDatabase = stagingName
@@ -221,7 +245,8 @@ class BackupRestoreService @Inject constructor(
             active.extracted = extracted
             active.dataSet = dataSet
             active.stagingDatabase = stagingName
-            return buildPreview(dataSet, extracted.manifest)
+            active.reconstruction = reconstructed.report
+            return buildPreview(dataSet, extracted.manifest, reconstructed.report, normalized)
         } finally {
             // The decrypted copy is not needed after extraction and must not linger.
             if (plain != active.archive) plain.delete()
@@ -492,6 +517,8 @@ class BackupRestoreService @Inject constructor(
     private fun buildPreview(
         dataSet: BackupDataSet,
         manifest: BackupManifest,
+        reconstruction: DerivedStateReconstructor.Report,
+        normalization: NormalizeResult,
     ): RestorePreview {
         val reminderRows = dataSet.rows("reminder_settings")
         val enabled = reminderRows.firstOrNull()?.let { row ->
@@ -523,6 +550,10 @@ class BackupRestoreService @Inject constructor(
             recordCount = recordCount,
             remindersEnabled = enabled,
             empty = recordCount == 0,
+            derivedSessionsRebuilt = reconstruction.sessionsCompleted + reconstruction.sessionsReopened,
+            derivedTaskCaches = reconstruction.taskCachesRefreshed,
+            derivedNotes = reconstruction.notes,
+            normalizerNotes = normalization.notes,
         )
     }
 }

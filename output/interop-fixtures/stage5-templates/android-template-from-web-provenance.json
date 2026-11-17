@@ -1,0 +1,33 @@
+{
+    "generatedBy": "b1ImportWebTemplateCreateOrderAndExport",
+    "description": "Android production import of a browser template file, order creation from it, then production re-export",
+    "appVersionName": "1.8.4",
+    "appVersionCode": 13,
+    "roomSchema": 15,
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "device": "sdk_gphone64_arm64",
+    "apiLevel": 36,
+    "hardware": "emulator",
+    "watermark": "emulator-not-physical-device",
+    "syntheticDataOnly": true,
+    "templateId": "bb2a99c6-1397-4493-af49-b7ac0e8faedf",
+    "files": [
+        {
+            "file": "android-template-from-web.json",
+            "sha256": "fcdc8f3559f2dfb66a93900af7ca55ff5d6fa1dcd87a611ba2468e9313e1ac30",
+            "sizeBytes": 5943
+        }
+    ],
+    "extra": {
+        "input": "web-template-native.json",
+        "inputSha256": "4304d5893d6e2105e6a77ee87eabac32d2fc46c8f56b20ddf9719844318c3af3",
+        "importedGameName": "网页模板游戏",
+        "createdOrderId": "74c1d8ef-ac6c-462c-8641-3ca6c7b55a99",
+        "createdOrderTitle": "网页模板标题",
+        "manualTitleKeptOnSwitch": "手填标题",
+        "secondTemplateId": "2acda58b-3c97-4f70-998d-e2d4992a52fd",
+        "templateFormat": 4,
+        "writtenThrough": "TemplateLibraryViewModel.onImportPicked/confirmImportSaveAs/exportTo + NewOrderViewModel"
+    }
+}

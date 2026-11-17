@@ -70,6 +70,159 @@ class MonthlyPersistenceTest {
             assertEquals(2, renewed.occurrences.size)
         } finally {
             env.close()
+        
+    @Test
+    fun monthlyRefreshDaysDriveWeeklyWindowsAndSurviveEditAndRenewal() = runBlocking {
+        val env = OrderTestEnvironment(context, initialInstant = Instant.parse("2026-01-20T04:00:00Z"))
+        try {
+            val (owner, account) = env.seedOwnerAndAccount()
+            val rules = com.daigan.record.core.time.GameRefreshRules.fromMinutes(
+                zoneId = java.time.ZoneId.of("Asia/Shanghai"),
+                dailyRefreshMinutes = 240,
+                weeklyRefreshDayIso = 1,
+                weeklyRefreshMinutes = 300,
+                monthlyRefreshDays = setOf(1, 15),
+            )
+            val orderId = env.orderRepository.createHostingOrder(
+                hostingDraft(
+                    owner.id, account.id, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31),
+                    tasks = listOf(TaskDraft(title = "每周", recurrence = RecurrenceType.WEEKLY)),
+                    rules = rules,
+                ),
+            )
+            val period = env.database.orderDao().findPeriods(orderId).single()
+            assertEquals("1,15", period.monthlyRefreshDays)
+            assertEquals(setOf(1, 15), env.orderRepository.observeOrderDetail(orderId).first()!!.order.monthlyRefreshDays)
+
+            val today = env.orderRepository.observeTodayHosting().first().single()
+            // 2026-01-20 is inside the 01-15 -> 02-01 monthly window, not a 7-day one.
+            assertEquals("W:2026-01-15", today.tasks.single().slot.key)
+
+            val updated = com.daigan.record.core.time.GameRefreshRules.fromMinutes(
+                zoneId = java.time.ZoneId.of("Asia/Shanghai"),
+                dailyRefreshMinutes = 240,
+                weeklyRefreshDayIso = 1,
+                weeklyRefreshMinutes = 300,
+                monthlyRefreshDays = setOf(1, 10, 20),
+            )
+            env.orderRepository.updateOrderRefresh(orderId, updated)
+            assertEquals("1,10,20", env.database.orderDao().findPeriods(orderId).single().monthlyRefreshDays)
+            assertEquals("W:2026-01-20", env.orderRepository.observeTodayHosting().first().single().tasks.single().slot.key)
+
+            env.clock.set(Instant.parse("2026-02-05T04:00:00Z"))
+            val renewal = env.orderRepository.renewHosting(orderId, "monthly-window-renewal", 30, 10000)
+            val renewed = env.database.orderDao().findPeriods(orderId).first { it.id == renewal.periodId }
+            assertEquals("1,10,20", renewed.monthlyRefreshDays)
+            assertEquals(
+                RecurrenceType.WEEKLY,
+                env.database.taskDao().findForPeriod(renewed.id).single().recurrence,
+            )
+        } finally {
+            env.close()
+        }
+    }
+}
+    
+    @Test
+    fun monthlyRefreshDaysDriveWeeklyWindowsAndSurviveEditAndRenewal() = runBlocking {
+        val env = OrderTestEnvironment(context, initialInstant = Instant.parse("2026-01-20T04:00:00Z"))
+        try {
+            val (owner, account) = env.seedOwnerAndAccount()
+            val rules = com.daigan.record.core.time.GameRefreshRules.fromMinutes(
+                zoneId = java.time.ZoneId.of("Asia/Shanghai"),
+                dailyRefreshMinutes = 240,
+                weeklyRefreshDayIso = 1,
+                weeklyRefreshMinutes = 300,
+                monthlyRefreshDays = setOf(1, 15),
+            )
+            val orderId = env.orderRepository.createHostingOrder(
+                hostingDraft(
+                    owner.id, account.id, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31),
+                    tasks = listOf(TaskDraft(title = "每周", recurrence = RecurrenceType.WEEKLY)),
+                    rules = rules,
+                ),
+            )
+            val period = env.database.orderDao().findPeriods(orderId).single()
+            assertEquals("1,15", period.monthlyRefreshDays)
+            assertEquals(setOf(1, 15), env.orderRepository.observeOrderDetail(orderId).first()!!.order.monthlyRefreshDays)
+
+            val today = env.orderRepository.observeTodayHosting().first().single()
+            // 2026-01-20 is inside the 01-15 -> 02-01 monthly window, not a 7-day one.
+            assertEquals("W:2026-01-15", today.tasks.single().slot.key)
+
+            val updated = com.daigan.record.core.time.GameRefreshRules.fromMinutes(
+                zoneId = java.time.ZoneId.of("Asia/Shanghai"),
+                dailyRefreshMinutes = 240,
+                weeklyRefreshDayIso = 1,
+                weeklyRefreshMinutes = 300,
+                monthlyRefreshDays = setOf(1, 10, 20),
+            )
+            env.orderRepository.updateOrderRefresh(orderId, updated)
+            assertEquals("1,10,20", env.database.orderDao().findPeriods(orderId).single().monthlyRefreshDays)
+            assertEquals("W:2026-01-20", env.orderRepository.observeTodayHosting().first().single().tasks.single().slot.key)
+
+            env.clock.set(Instant.parse("2026-02-05T04:00:00Z"))
+            val renewal = env.orderRepository.renewHosting(orderId, "monthly-window-renewal", 30, 10000)
+            val renewed = env.database.orderDao().findPeriods(orderId).first { it.id == renewal.periodId }
+            assertEquals("1,10,20", renewed.monthlyRefreshDays)
+            assertEquals(
+                RecurrenceType.WEEKLY,
+                env.database.taskDao().findForPeriod(renewed.id).single().recurrence,
+            )
+        } finally {
+            env.close()
+        }
+    }
+}
+
+    @Test
+    fun monthlyRefreshDaysDriveWeeklyWindowsAndSurviveEditAndRenewal() = runBlocking {
+        val env = OrderTestEnvironment(context, initialInstant = Instant.parse("2026-01-20T04:00:00Z"))
+        try {
+            val (owner, account) = env.seedOwnerAndAccount()
+            val rules = com.daigan.record.core.time.GameRefreshRules.fromMinutes(
+                zoneId = java.time.ZoneId.of("Asia/Shanghai"),
+                dailyRefreshMinutes = 240,
+                weeklyRefreshDayIso = 1,
+                weeklyRefreshMinutes = 300,
+                monthlyRefreshDays = setOf(1, 15),
+            )
+            val orderId = env.orderRepository.createHostingOrder(
+                hostingDraft(
+                    owner.id, account.id, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31),
+                    tasks = listOf(TaskDraft(title = "每周", recurrence = RecurrenceType.WEEKLY)),
+                    rules = rules,
+                ),
+            )
+            val period = env.database.orderDao().findPeriods(orderId).single()
+            assertEquals("1,15", period.monthlyRefreshDays)
+            assertEquals(setOf(1, 15), env.orderRepository.observeOrderDetail(orderId).first()!!.order.monthlyRefreshDays)
+
+            val today = env.orderRepository.observeTodayHosting().first().single()
+            // 2026-01-20 is inside the 01-15 -> 02-01 monthly window, not a 7-day one.
+            assertEquals("W:2026-01-15", today.tasks.single().slot.key)
+
+            val updated = com.daigan.record.core.time.GameRefreshRules.fromMinutes(
+                zoneId = java.time.ZoneId.of("Asia/Shanghai"),
+                dailyRefreshMinutes = 240,
+                weeklyRefreshDayIso = 1,
+                weeklyRefreshMinutes = 300,
+                monthlyRefreshDays = setOf(1, 10, 20),
+            )
+            env.orderRepository.updateOrderRefresh(orderId, updated)
+            assertEquals("1,10,20", env.database.orderDao().findPeriods(orderId).single().monthlyRefreshDays)
+            assertEquals("W:2026-01-20", env.orderRepository.observeTodayHosting().first().single().tasks.single().slot.key)
+
+            env.clock.set(Instant.parse("2026-02-05T04:00:00Z"))
+            val renewal = env.orderRepository.renewHosting(orderId, "monthly-window-renewal", 30, 10000)
+            val renewed = env.database.orderDao().findPeriods(orderId).first { it.id == renewal.periodId }
+            assertEquals("1,10,20", renewed.monthlyRefreshDays)
+            assertEquals(
+                RecurrenceType.WEEKLY,
+                env.database.taskDao().findForPeriod(renewed.id).single().recurrence,
+            )
+        } finally {
+            env.close()
         }
     }
 }

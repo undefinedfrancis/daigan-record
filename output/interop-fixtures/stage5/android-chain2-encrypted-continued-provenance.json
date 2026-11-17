@@ -1,0 +1,68 @@
+{
+    "generatedBy": "com.daigan.record.backup.Stage5ExchangeTest#b2RestoreWebEncryptedUnicodeAndContinue",
+    "description": "Android production restore followed by real business commands, then production export",
+    "appVersionName": "1.8.4",
+    "appVersionCode": 13,
+    "roomSchema": 15,
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "device": "Google sdk_gphone64_arm64",
+    "apiLevel": 36,
+    "hardware": "emulator",
+    "watermark": "emulator-not-physical-device",
+    "generatedAt": "2026-03-11T02:00:00Z",
+    "syntheticDataOnly": true,
+    "attachmentKind": "real-jpeg-produced-on-device",
+    "extra": {
+        "continuedTaskId": "411235d9-073c-45a5-a4c9-a84051460495",
+        "continuedOrderId": "df3d6c7f-d01d-4bc4-8b5d-bc1ee1da77ff",
+        "absoluteTotals": "10 then 15 -> 15",
+        "earlierCorrection": "8 on the first observation; later total still 15",
+        "categoryRenameAndDelete": true,
+        "receiptAmendment": true
+    },
+    "files": [
+        {
+            "file": "android-chain2-encrypted-continued.dgbk",
+            "sha256": "9f5620152d2a65561f73503642f7ded82d00dfc6b4ac7720b50188ae97eb322e",
+            "sizeBytes": 6111,
+            "encrypted": false
+        },
+        {
+            "file": "android-chain2-encrypted-continued-canonical.json",
+            "sha256": "fbe7369cba772526b9d5b64972497192f0c00821b8af715c205c5ad6ab185b3f",
+            "sizeBytes": 34691
+        }
+    ],
+    "rowCounts": {
+        "owners": 2,
+        "owner_number_sequence": 1,
+        "account_categories": 2,
+        "game_accounts": 2,
+        "game_server_options": 0,
+        "game_templates": 2,
+        "template_categories": 5,
+        "template_tasks": 6,
+        "template_price_presets": 0,
+        "template_seed_state": 1,
+        "completion_batches": 0,
+        "orders": 3,
+        "hosting_periods": 2,
+        "hosting_sessions": 1,
+        "order_price_changes": 0,
+        "task_definitions": 4,
+        "task_occurrences": 11,
+        "task_progress_events": 6,
+        "completion_batch_items": 0,
+        "attachments": 1,
+        "receipts": 2,
+        "receipt_corrections": 1,
+        "order_creation_operations": 3,
+        "reminder_settings": 0
+    },
+    "limitations": [
+        "Emulator only: no physical device participated.",
+        "Synthetic data; no real user records or secrets.",
+        "exportedAt / ZIP timestamps change per run, so archive hashes differ between runs."
+    ]
+}

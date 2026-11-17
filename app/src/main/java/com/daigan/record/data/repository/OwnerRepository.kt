@@ -11,10 +11,13 @@ import com.daigan.record.data.local.dao.OrderDao
 import com.daigan.record.data.local.dao.OwnerDao
 import com.daigan.record.data.local.entity.HostingPeriodEntity
 import com.daigan.record.data.local.entity.OwnerEntity
+import com.daigan.record.data.model.HostingMode
+import com.daigan.record.data.model.OrderType
 import com.daigan.record.data.model.Owner
 import com.daigan.record.data.model.OwnerDetail
 import com.daigan.record.data.model.OwnerSummary
 import com.daigan.record.data.model.OwnerValidation
+import com.daigan.record.data.model.ReceiptStatus
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,7 +56,62 @@ interface OwnerRepository {
      * Accounts archived independently stay archived. Repeated calls are no-ops.
      */
     suspend fun restoreOwner(ownerId: String)
+
+    /**
+     * What a permanent deletion of this **archived** owner would remove (UF-031), read
+     * before anything is deleted: accounts, orders, rounds/check-ins, receipts with their
+     * collected sum (which leaves the statistics) and the outstanding debt.
+     */
+    suspend fun ownerDeletionImpact(ownerId: String): OwnerDeletionImpact {
+        error("不支持删除老板")
+    }
+
+    /**
+     * Permanently deletes an archived owner and every dependent row in one transaction.
+     * Other owners are never touched. Attachment *files* are cleaned up by the caller
+     * after the commit and retried by the start-up orphan pass if that pass fails.
+     */
+    suspend fun deleteArchivedOwner(ownerId: String): OwnerDeletionSummary {
+        error("不支持删除老板")
+    }
 }
+
+/**
+ * Read-only preview of an archived owner's permanent deletion. Counts and money are
+ * computed from the same rows the transaction later deletes, so the confirmation text
+ * and the result cannot disagree.
+ */
+data class OwnerDeletionImpact(
+    val ownerId: String,
+    val ownerNumber: String,
+    val ownerNickname: String,
+    val accountCount: Int,
+    /** Every order of every account, including cancelled and completed ones. */
+    val orderCount: Int,
+    val activeOrderCount: Int,
+    val periodCount: Int,
+    val occurrenceCount: Int,
+    /** Count-based hosting rounds, which are not check-ins but their own identity. */
+    val sessionCount: Int,
+    /** Effective receipts only: voided/replaced rows never counted as income. */
+    val receiptCount: Int,
+    val receiptSumCents: Long,
+    val outstandingCents: Long,
+    val attachmentCount: Int,
+) {
+    val isEmpty: Boolean
+        get() = accountCount == 0 && orderCount == 0 && attachmentCount == 0
+}
+
+data class OwnerDeletionSummary(
+    val ownerId: String,
+    val ownerNickname: String,
+    val deletedAccountCount: Int,
+    val deletedOrderCount: Int,
+    val deletedDependentRowCount: Int,
+    /** True when the committed deletion left files for the start-up orphan pass. */
+    val attachmentCleanupDeferred: Boolean = false,
+)
 
 @Singleton
 class DefaultOwnerRepository @Inject constructor(
@@ -158,10 +216,24 @@ class DefaultOwnerRepository @Inject constructor(
             require(orderDao.countUnfinishedShortOrdersForOwner(ownerId) == 0) {
                 ARCHIVED_OWNER_HAS_ACTIVE_WORK_MESSAGE
             }
+            val ownerOrders = accountDao.findForOwner(ownerId)
+                .flatMap { orderDao.findForAccount(it.id) }
+            val countBasedOrderIds = ownerOrders
+                .filter { it.hostingMode == HostingMode.COUNT_BASED }
+                .map { it.id }
+                .toSet()
             assertNoUnexpiredPeriod(
                 periods = orderDao.findHostingPeriodsForOwner(ownerId),
                 now = now,
                 message = ARCHIVED_OWNER_HAS_ACTIVE_WORK_MESSAGE,
+                skipOrderIds = countBasedOrderIds,
+            )
+            // Count-based hosting has no expiry date, so it needs its own guard.
+            assertNoUnfinishedCountHosting(
+                orders = ownerOrders,
+                sessionsOf = { orderId -> database.hostingSessionDao().findForOrder(orderId) },
+                periodsOf = { orderId -> orderDao.findPeriods(orderId) },
+                message = ARCHIVED_OWNER_HAS_UNFINISHED_COUNT_MESSAGE,
             )
 
             // The batch id is the identity of "archived together with its owner".
@@ -199,6 +271,91 @@ class DefaultOwnerRepository @Inject constructor(
             }
         }
     }
+
+    /**
+     * UF-031 read side. Counts come from the rows the delete transaction will remove, so
+     * the confirmation dialog can state the real impact (including outstanding debt)
+     * without a second, differently-filtered query.
+     */
+    override suspend fun ownerDeletionImpact(ownerId: String): OwnerDeletionImpact {
+        val owner = ownerDao.findById(ownerId) ?: throw IllegalArgumentException("老板不存在")
+        val accounts = accountDao.findForOwner(ownerId)
+        val orders = accounts.flatMap { orderDao.findForAccount(it.id) }
+        val periods = orders.flatMap { orderDao.findPeriods(it.id) }
+        val occurrences = orders.flatMap { database.occurrenceDao().findForOrder(it.id) }
+        val sessions = orders.flatMap { database.hostingSessionDao().findForOrder(it.id) }
+        val attachments = orders.flatMap { database.attachmentDao().findForOrder(it.id) }
+        val receipts = orders.flatMap { database.receiptDao().findForOrder(it.id) }
+        val activeReceipts = receipts.filter { it.status == ReceiptStatus.ACTIVE }
+        val activeOrderIds = orders.filter { it.cancelledAt == null }.map { it.id }.toSet()
+        val outstanding = periods.filter { it.orderId in activeOrderIds }.sumOf { period ->
+            val paid = activeReceipts.filter { it.periodId == period.id }.sumOf { it.amountCents }
+            (period.priceCents - paid).coerceAtLeast(0L)
+        } + orders.filter { it.type == OrderType.SHORT_TASK && it.cancelledAt == null }.sumOf { order ->
+            val paid = activeReceipts
+                .filter { it.orderId == order.id && it.periodId == null }
+                .sumOf { it.amountCents }
+            ((order.priceCents ?: 0L) - paid).coerceAtLeast(0L)
+        }
+        return OwnerDeletionImpact(
+            ownerId = ownerId,
+            ownerNumber = owner.toModel().displayNumber,
+            ownerNickname = owner.nickname,
+            accountCount = accounts.size,
+            orderCount = orders.size,
+            activeOrderCount = orders.count { it.cancelledAt == null },
+            periodCount = periods.size,
+            occurrenceCount = occurrences.size,
+            sessionCount = sessions.size,
+            receiptCount = activeReceipts.size,
+            receiptSumCents = activeReceipts.sumOf { it.amountCents },
+            outstandingCents = outstanding,
+            attachmentCount = attachments.size,
+        )
+    }
+
+    /**
+     * UF-031 write side: one transaction removes every order of every account of this
+     * owner (tasks, rounds, check-ins, receipts, corrections, batches, prices, creation
+     * identity) and finally the account and owner rows. A failure rolls the whole owner
+     * back; other owners' rows are never in scope.
+     */
+    override suspend fun deleteArchivedOwner(ownerId: String): OwnerDeletionSummary =
+        database.withDatasetTransaction {
+            val owner = ownerDao.findById(ownerId) ?: throw IllegalArgumentException("老板不存在")
+            require(owner.archivedAt != null) {
+                "只能删除已归档的老板；请先归档后再删除，或保留这份档案"
+            }
+            val accounts = accountDao.findForOwner(ownerId)
+            var deletedOrders = 0
+            var deletedRows = 0
+            accounts.forEach { account ->
+                orderDao.findForAccount(account.id).forEach { order ->
+                    val summary = deleteOrderCascade(
+                        orderId = order.id,
+                        orderDao = orderDao,
+                        taskDao = database.taskDao(),
+                        occurrenceDao = database.occurrenceDao(),
+                        receiptDao = database.receiptDao(),
+                        attachmentDao = database.attachmentDao(),
+                        completionBatchDao = database.completionBatchDao(),
+                        hostingSessionDao = database.hostingSessionDao(),
+                    )
+                    deletedOrders += 1
+                    deletedRows += summary.occurrenceCount + summary.receiptCount +
+                        summary.attachmentCount
+                }
+                accountDao.deleteById(account.id)
+            }
+            ownerDao.deleteById(ownerId)
+            OwnerDeletionSummary(
+                ownerId = ownerId,
+                ownerNickname = owner.nickname,
+                deletedAccountCount = accounts.size,
+                deletedOrderCount = deletedOrders,
+                deletedDependentRowCount = deletedRows,
+            )
+        }
 
     private companion object {
         const val MAX_ALLOCATION_ATTEMPTS = 3

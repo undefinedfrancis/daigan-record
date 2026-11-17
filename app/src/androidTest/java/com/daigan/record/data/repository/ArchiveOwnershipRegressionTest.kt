@@ -59,7 +59,14 @@ class ArchiveOwnershipRegressionTest {
             ownerDao = database.ownerDao(),
             accountDao = database.gameAccountDao(),
             orderDao = database.orderDao(),
+            taskDao = database.taskDao(),
+            occurrenceDao = database.occurrenceDao(),
+            receiptDao = database.receiptDao(),
+            attachmentDao = database.attachmentDao(),
+            completionBatchDao = database.completionBatchDao(),
+            categoryDao = database.accountCategoryDao(),
             timeProvider = clock,
+            attachmentCleanup = AttachmentFileCleanup { 0 },
         )
     }
 

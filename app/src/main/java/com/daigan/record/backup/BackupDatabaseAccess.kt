@@ -16,6 +16,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -40,13 +41,17 @@ class BackupDatabaseAccess @Inject constructor(
 
     fun dumpRaw(db: SupportSQLiteDatabase): BackupDataSet {
         val tables = BackupTableCatalog.includedTables.map { table ->
-            val columns = table.columnNames.joinToString(", ") { "`$it`" }
+            // 只查询**真实存在**的列：历史网页扩展列（serviceMode/serviceCount）在便携
+            // 目录里保留读取能力，但本机 schema 没有它们。
+            val written = table.columns.filterNot { it.legacyOnly }
+            val columns = written.joinToString(", ") { "`${it.name}`" }
             val rows = ArrayList<List<JsonElement?>>()
             db.query("SELECT $columns FROM `${table.name}`").use { cursor ->
                 while (cursor.moveToNext()) {
-                    val row = ArrayList<JsonElement?>(table.columns.size)
-                    table.columns.forEachIndexed { index, column ->
-                        row += when (cursor.getType(index)) {
+                    val full = MutableList<JsonElement?>(table.columns.size) { null }
+                    written.forEachIndexed { index, column ->
+                        val position = table.columnNames.indexOf(column.name)
+                        full[position] = when (cursor.getType(index)) {
                             android.database.Cursor.FIELD_TYPE_NULL -> null
                             android.database.Cursor.FIELD_TYPE_INTEGER -> {
                                 if (column.type != BackupTableCatalog.ColumnType.INTEGER) {
@@ -73,7 +78,7 @@ class BackupDatabaseAccess @Inject constructor(
                             )
                         }
                     }
-                    rows += row
+                    rows += full
                 }
             }
             BackupDataSet.TableRows(table, rows)
@@ -82,41 +87,88 @@ class BackupDatabaseAccess @Inject constructor(
     }
 
     fun deleteAll(db: SupportSQLiteDatabase) {
+        // `task_progress_events.correctsEventId` 是自引用 RESTRICT 外键，SQLite 会**逐行**
+        // 立即检查，因此必须由叶子向内逐层删除。事件链在契约里保证无环，这里的循环次数
+        // 只是防御上限；最后仍会无条件清空整表。
+        var remaining = 1
+        var guard = 0
+        while (remaining > 0 && guard++ < 64) {
+            db.execSQL(
+                "DELETE FROM `task_progress_events` WHERE `id` NOT IN (" +
+                    "SELECT `correctsEventId` FROM `task_progress_events` " +
+                    "WHERE `correctsEventId` IS NOT NULL)",
+            )
+            db.query("SELECT COUNT(*) FROM `task_progress_events`").use { cursor ->
+                remaining = if (cursor.moveToFirst()) cursor.getInt(0) else 0
+            }
+        }
         BackupTableCatalog.deletionOrder.forEach { name ->
             db.execSQL("DELETE FROM `$name`")
         }
     }
 
     fun insertAll(db: SupportSQLiteDatabase, dataSet: BackupDataSet) {
+        // 便携契约只固定**表**顺序，不固定表内行顺序。`task_progress_events.correctsEventId`、
+        // `receipts.replacedByReceiptId`、`receipt_corrections.newReceiptId` 等自引用外键，
+        // 以及同一张表里互相引用的行，可能由别的平台按主键序写出（被引用行在后面）。
+        // 这里把外键检查推迟到同一事务提交时：仍然严格（提交时悬空即整笔回滚），
+        // 但不再依赖写入行的先后。调用方都在事务内（staging 校验与整体替换）。
+        db.execSQL("PRAGMA defer_foreign_keys = ON")
         dataSet.tables.forEach { tableRows ->
             val table = tableRows.table
             if (tableRows.rows.isEmpty()) return@forEach
-            val columns = table.columnNames.joinToString(", ") { "`$it`" }
-            val placeholders = table.columns.joinToString(", ") { "?" }
+            // 目标库没有 legacy-only 列：只写便携目录中真实存在的列。
+            val written = table.columns.filterNot { it.legacyOnly }
+            val positions = written.map { table.columnNames.indexOf(it.name) }
+            val columns = written.joinToString(", ") { "`${it.name}`" }
+            val placeholders = written.joinToString(", ") { "?" }
             val statement = db.compileStatement(
                 "INSERT INTO `${table.name}` ($columns) VALUES ($placeholders)",
             )
             try {
                 tableRows.rows.forEach { row ->
                     statement.clearBindings()
-                    row.forEachIndexed { index, value ->
+                    positions.forEachIndexed { index, position ->
+                        val value = row.getOrNull(position)
                         val bindIndex = index + 1
                         when {
-                            value == null -> statement.bindNull(bindIndex)
+                            // 归一化/重建阶段用 `JsonNull` 表示空值，解码阶段用 Kotlin null；
+                            // 两者都必须是 SQL NULL（`JsonNull` 不是 Kotlin null）。
+                            value == null || value is JsonNull -> statement.bindNull(bindIndex)
                             value is JsonPrimitive && value.isString ->
                                 statement.bindString(bindIndex, value.content)
 
                             else -> statement.bindLong(
                                 bindIndex,
                                 (value as JsonPrimitive).content.toLongOrNull()
-                                    ?: throw BackupException("备份包含无法写入的数值，无法恢复。"),
+                                    ?: throw BackupException(
+                                        "备份的数据表「${table.name}」的「${written[index].name}」" +
+                                            "包含无法写入的数值（${(value as JsonPrimitive).content}），无法恢复。",
+                                    ),
                             )
                         }
                     }
                     statement.executeInsert()
                 }
+            } catch (error: Throwable) {
+                // 引用关系（含延迟到提交的 RESTRICT 外键）不成立时，数据库异常本身对用户
+                // 没有意义；按表给对象级说明，并把原始异常保留为 cause。
+                if (error is BackupException) throw error
+                throw BackupException(
+                    "备份的数据表「${table.name}」的记录与其它表不一致，无法恢复（数据未写入本机）。",
+                    error,
+                )
             } finally {
                 statement.close()
+            }
+        }
+        // 延迟外键的检查发生在提交时；这里显式先跑一次，让失败也落在"按表"的诊断上。
+        db.query("PRAGMA foreign_key_check").use { cursor ->
+            if (cursor.moveToFirst()) {
+                val table = cursor.getString(0)
+                throw BackupException(
+                    "备份的数据表「$table」的引用关系不成立，无法恢复（数据未写入本机）。",
+                )
             }
         }
     }

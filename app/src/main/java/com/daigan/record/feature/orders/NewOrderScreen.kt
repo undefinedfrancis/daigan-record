@@ -22,6 +22,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -50,10 +52,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.daigan.record.data.model.HostingMode
 import com.daigan.record.data.model.Money
 import com.daigan.record.data.model.OrderType
 import com.daigan.record.data.model.PaymentChannel
 import com.daigan.record.data.model.PaymentMode
+import com.daigan.record.data.model.NumericMode
 import com.daigan.record.data.model.ProgressType
 import com.daigan.record.data.model.RecurrenceType
 import com.daigan.record.data.model.TaskDraft
@@ -100,6 +104,7 @@ fun NewOrderScreen(
         onClearTemplate = viewModel::clearTemplate,
         onTitle = viewModel::updateTitle,
         onPrice = viewModel::updatePrice,
+        onSelectPricePreset = viewModel::selectPricePreset,
         onPaymentMode = viewModel::selectPaymentMode,
         onInitialPaymentEnabled = viewModel::setInitialPaymentEnabled,
         onInitialAmount = viewModel::updateInitialAmount,
@@ -111,10 +116,15 @@ fun NewOrderScreen(
         onStartDate = viewModel::setStartDate,
         onDuration = viewModel::setDurationText,
         onEndDate = viewModel::setEndDate,
+        onServiceMode = viewModel::setServiceDayMode,
+        onServiceWeekday = viewModel::toggleServiceWeekday,
+        onSelectHostingMode = viewModel::selectHostingMode,
+        onTargetSessions = viewModel::updateTargetSessions,
         onZone = viewModel::setZoneText,
         onDailyRefresh = viewModel::setDailyRefresh,
         onWeeklyDay = viewModel::setWeeklyRefreshDay,
         onWeeklyTime = viewModel::setWeeklyRefreshTime,
+        onMonthlyRefreshDays = viewModel::setMonthlyRefreshDaysText,
         onAddTask = viewModel::addTask,
         onRemoveTask = viewModel::removeTask,
         onUpdateTask = viewModel::updateTask,
@@ -136,6 +146,7 @@ internal fun NewOrderScreen(
     onClearTemplate: () -> Unit,
     onTitle: (String) -> Unit,
     onPrice: (String) -> Unit,
+    onSelectPricePreset: (String) -> Unit,
     onPaymentMode: (PaymentMode) -> Unit,
     onInitialPaymentEnabled: (Boolean) -> Unit,
     onInitialAmount: (String) -> Unit,
@@ -151,12 +162,17 @@ internal fun NewOrderScreen(
     onDailyRefresh: (LocalTime) -> Unit,
     onWeeklyDay: (DayOfWeek) -> Unit,
     onWeeklyTime: (LocalTime) -> Unit,
+    onMonthlyRefreshDays: (String) -> Unit = {},
     onAddTask: () -> Unit,
     onRemoveTask: (Int) -> Unit,
     onUpdateTask: (Int, (TaskDraft) -> TaskDraft) -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
     snackbar: SnackbarHostState = remember { SnackbarHostState() },
+    onServiceMode: (Boolean) -> Unit = {},
+    onServiceWeekday: (DayOfWeek) -> Unit = {},
+    onSelectHostingMode: (HostingMode) -> Unit = {},
+    onTargetSessions: (String) -> Unit = {},
 ) {
     val createdOrderId = uiState.createdOrderId
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }, modifier = modifier) { padding ->
@@ -256,40 +272,103 @@ internal fun NewOrderScreen(
                         }
                     } else {
                         item {
-                            SectionTitle("托管期限")
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    DateField(
-                                        label = "开始日期",
-                                        date = uiState.startDate,
-                                        onDate = onStartDate,
-                                    )
-                                }
-                                Box(modifier = Modifier.weight(1f)) {
-                                    OutlinedTextField(
-                                        value = uiState.durationText,
-                                        onValueChange = onDuration,
-                                        label = { Text("托管天数") },
-                                        singleLine = true,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
+                            SectionTitle("托管方式")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = !uiState.countBased,
+                                    onClick = { onSelectHostingMode(HostingMode.DATE_RANGE) },
+                                    label = { Text("按日期托管") },
+                                )
+                                FilterChip(
+                                    selected = uiState.countBased,
+                                    onClick = { onSelectHostingMode(HostingMode.COUNT_BASED) },
+                                    label = { Text("打卡式托管") },
+                                    modifier = Modifier.testTag("new-order-count-mode"),
+                                )
                             }
-                            Text(
-                                text = "开始日计为第 1 天，可直接调整到期日。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                            DateField(
-                                label = "到期日期（含当天）",
-                                date = uiState.endDate,
-                                onDate = onEndDate,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
+                            if (uiState.countBased) {
+                                Text(
+                                    text = "只约定总次数，不设开始/截止日期和固定星期；" +
+                                        "未打卡的日子不扣次数，达到次数即视为完成。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        if (uiState.countBased) {
+                            item {
+                                OutlinedTextField(
+                                    value = uiState.targetSessionsText,
+                                    onValueChange = onTargetSessions,
+                                    label = { Text("目标打卡次数") },
+                                    singleLine = true,
+                                    isError = uiState.formErrors.containsKey("targetSessions"),
+                                    supportingText = {
+                                        uiState.formErrors["targetSessions"]?.let { Text(it) }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("new-order-target-sessions"),
+                                )
+                                Text(
+                                    text = "每轮需完成全部任务才计 1 次，同一天可以完成多轮；" +
+                                        "下一轮从空白进度开始，上一轮记录保留。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            item {
+                                SectionTitle("托管期限")
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        DateField(
+                                            label = "开始日期",
+                                            date = uiState.startDate,
+                                            onDate = onStartDate,
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        OutlinedTextField(
+                                            value = uiState.durationText,
+                                            onValueChange = onDuration,
+                                            label = { Text(if (uiState.serviceDayMode) "计划服务天数" else "托管天数") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
+                                Row {
+                                    FilterChip(selected = !uiState.serviceDayMode, onClick = { onServiceMode(false) }, label = { Text("连续日期") })
+                                    FilterChip(selected = uiState.serviceDayMode, onClick = { onServiceMode(true) }, label = { Text("累计服务日") })
+                                }
+                                if (uiState.serviceDayMode) {
+                                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        DayOfWeek.entries.forEach { day -> FilterChip(selected = day in uiState.serviceWeekdays,
+                                            onClick = { onServiceWeekday(day) }, label = { Text(dayLabel(day)) }) }
+                                    }
+                                    Text("按所选星期的计划服务日累计；漏打卡不会延长，不含法定调休规则。", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Text(
+                                    text = if (uiState.serviceDayMode) "非服务日不生成任务，续期沿用服务星期。" else "开始日计为第 1 天，可直接调整到期日。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                                if (uiState.serviceDayMode) {
+                                    val calculated = runCatching { com.daigan.record.core.time.GameCalendar.hostingEndDateForWeekdays(uiState.startDate,
+                                        uiState.durationText.toIntOrNull()?.takeIf { it in 1..3650 } ?: error("invalid"), uiState.serviceWeekdays) }.getOrNull()
+                                    Text(calculated?.let { "预计结束日期（含当天）：$it" } ?: "请填写有效服务天数并选择服务星期")
+                                } else DateField(
+                                    label = "到期日期（含当天）",
+                                    date = uiState.endDate,
+                                    onDate = onEndDate,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
                         }
                         item {
                             RefreshRulesEditor(
@@ -297,6 +376,8 @@ internal fun NewOrderScreen(
                                 onZone = onZone,
                                 dailyRefresh = uiState.dailyRefresh,
                                 onDailyRefresh = onDailyRefresh,
+                                monthlyRefreshDaysText = uiState.monthlyRefreshDaysText,
+                                onMonthlyRefreshDays = onMonthlyRefreshDays,
                             )
                         }
                     }
@@ -340,6 +421,10 @@ internal fun NewOrderScreen(
                             },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
+                        )
+                        PricePresetMenu(
+                            state = uiState,
+                            onSelect = onSelectPricePreset,
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -533,6 +618,67 @@ private fun TemplateSelector(
             }
         }
     }
+}
+
+/**
+ * Dropdown of the applied template's price presets. Selecting one fills the price field
+ * through the view model; the field stays editable afterwards, and this menu never
+ * changes the price on its own. A template with no presets renders nothing here, so the
+ * form looks and behaves exactly as it did before presets existed.
+ */
+@Composable
+private fun PricePresetMenu(
+    state: NewOrderUiState,
+    onSelect: (String) -> Unit,
+) {
+    if (state.templatePricePresets.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
+    val selected = state.templatePricePresets.firstOrNull { it.id == state.selectedPricePresetId }
+    Box(modifier = Modifier.padding(top = 8.dp)) {
+        TextButton(
+            onClick = { expanded = true },
+            modifier = Modifier.testTag("new-order-price-preset-trigger"),
+        ) {
+            Text(
+                text = if (selected != null) {
+                    "预设价格：${Money.formatCents(selected.amountCents)}"
+                } else {
+                    "选择预设价格"
+                },
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            state.templatePricePresets.forEachIndexed { index, preset ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = buildString {
+                                append(Money.formatCents(preset.amountCents))
+                                preset.label?.takeIf { it.isNotBlank() }
+                                    ?.let { append("（$it）") }
+                            },
+                        )
+                    },
+                    onClick = {
+                        onSelect(preset.id)
+                        expanded = false
+                    },
+                    modifier = Modifier.testTag("new-order-price-preset-$index"),
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("手动填写") },
+                onClick = { expanded = false },
+                modifier = Modifier.testTag("new-order-price-preset-manual"),
+            )
+        }
+    }
+    Text(
+        text = "选择后会填入价格，仍可继续手动修改。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -753,6 +899,8 @@ private fun RefreshRulesEditor(
     onZone: (String) -> Unit,
     dailyRefresh: LocalTime,
     onDailyRefresh: (LocalTime) -> Unit,
+    monthlyRefreshDaysText: String = "",
+    onMonthlyRefreshDays: (String) -> Unit = {},
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -764,13 +912,25 @@ private fun RefreshRulesEditor(
                 onTime = onDailyRefresh,
                 modifier = Modifier.padding(top = 8.dp),
             )
+            OutlinedTextField(
+                value = monthlyRefreshDaysText,
+                onValueChange = onMonthlyRefreshDays,
+                label = { Text("每月刷新日（如 1,15；留空按周）") },
+                singleLine = true,
+                supportingText = {
+                    Text("设置后每周任务按「刷新到刷新」的月度窗口计算；该月没有的日号自动跳过。")
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            )
 
         }
     }
 }
 
 @Composable
-private fun TaskEditor(
+internal fun TaskEditor(
     index: Int,
     task: TaskDraft,
     hosting: Boolean,
@@ -818,6 +978,39 @@ private fun TaskEditor(
                 )
             }
             if (task.progressType == ProgressType.NUMERIC) {
+                // UF-038: the mode is an explicit choice. Ordinary keeps per-occurrence
+                // targets; cumulative records the current absolute total against one goal.
+                Text(
+                    text = "数值口径",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = task.effectiveNumericMode == NumericMode.PER_OCCURRENCE,
+                        onClick = {
+                            onChange { it.copy(numericMode = NumericMode.PER_OCCURRENCE) }
+                        },
+                        label = { Text("逐次目标") },
+                        modifier = Modifier.testTag("task-numeric-mode-occurrence"),
+                    )
+                    FilterChip(
+                        selected = task.effectiveNumericMode == NumericMode.CUMULATIVE,
+                        onClick = {
+                            onChange { it.copy(numericMode = NumericMode.CUMULATIVE) }
+                        },
+                        label = { Text("累计总值") },
+                        modifier = Modifier.testTag("task-numeric-mode-cumulative"),
+                    )
+                }
+                if (task.effectiveNumericMode == NumericMode.CUMULATIVE) {
+                    Text(
+                        text = "打卡时填写当前累计总值（例如已累计 10，而不是本次 +10），" +
+                            "系统按目标值判断是否达成。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -845,6 +1038,41 @@ private fun TaskEditor(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            Text(
+                text = "生效日期（选填）",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = task.activeFrom,
+                    onValueChange = { value -> onChange { it.copy(activeFrom = value) } },
+                    label = { Text("开始生效") },
+                    placeholder = { Text("2026-10-01") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("task-active-from-$index"),
+                )
+                OutlinedTextField(
+                    value = task.activeUntil,
+                    onValueChange = { value -> onChange { it.copy(activeUntil = value) } },
+                    label = { Text("停止生效") },
+                    placeholder = { Text("2026-12-31") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("task-active-until-$index"),
+                )
+            }
+            Text(
+                text = "留空表示随订单始终有效；日期按游戏日归属。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (hosting) {
                 Text(
                     text = "重复周期",
@@ -901,7 +1129,7 @@ private fun TaskEditor(
                     RecurrenceType.MONTHLY -> OutlinedTextField(
                         value = task.monthDay,
                         onValueChange = { value -> onChange { it.copy(monthDay = value) } },
-                        label = { Text("每月几号（1–31；当月无该日则跳过）") },
+                        label = { Text("每月日号（如 1,15；当月无该日跳过）") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )

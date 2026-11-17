@@ -38,6 +38,25 @@ interface GameAccountDao {
     @Query("SELECT COUNT(*) FROM game_accounts WHERE ownerId = :ownerId")
     suspend fun countForOwner(ownerId: String): Int
 
+    /** All accounts of one owner, archived included; used by the owner deletion path. */
+    @Query("SELECT * FROM game_accounts WHERE ownerId = :ownerId ORDER BY createdAt ASC, rowid ASC")
+    suspend fun findForOwner(ownerId: String): List<GameAccountEntity>
+
+    /** 分类删除前统计将变为未分类的账号数（UF-037）。 */
+    @Query("SELECT COUNT(*) FROM game_accounts WHERE categoryId = :categoryId")
+    suspend fun countForCategory(categoryId: String): Int
+
+    /** 分类视图：某分类下的账号，归档账号也包含（由调用方决定是否隐藏）。 */
+    @Query("SELECT * FROM game_accounts WHERE categoryId = :categoryId ORDER BY createdAt ASC, rowid ASC")
+    suspend fun findForCategory(categoryId: String): List<GameAccountEntity>
+
+    /** 未分类账号（`categoryId IS NULL`），用于「未分类」筛选。 */
+    @Query("SELECT * FROM game_accounts WHERE categoryId IS NULL ORDER BY createdAt ASC, rowid ASC")
+    suspend fun findUncategorized(): List<GameAccountEntity>
+
+    @Query("DELETE FROM game_accounts WHERE id = :accountId")
+    suspend fun deleteById(accountId: String)
+
     @Insert
     suspend fun insert(account: GameAccountEntity)
 
@@ -52,6 +71,8 @@ interface GameAccountDao {
             password = :password,
             defaultTemplateId = :defaultTemplateId,
             loginDevice = :loginDevice,
+            resourceNotes = :resourceNotes,
+            categoryId = :categoryId,
             updatedAt = :updatedAt
         WHERE id = :accountId
         """
@@ -66,6 +87,8 @@ interface GameAccountDao {
         password: String?,
         defaultTemplateId: String?,
         loginDevice: String?,
+        resourceNotes: String?,
+        categoryId: String?,
         updatedAt: Instant,
     )
 

@@ -69,6 +69,8 @@ class DefaultReceiptRepository @Inject constructor(
                 periodIndex = period?.periodIndex,
                 periodStart = period?.startDate,
                 periodEnd = period?.endDate,
+                countBased = order.hostingMode ==
+                    com.daigan.record.data.model.HostingMode.COUNT_BASED,
                 correctedToCents = if (receipt.status == ReceiptStatus.REPLACED) {
                     correction?.newAmountCents
                 } else {

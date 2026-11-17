@@ -7,6 +7,7 @@ import com.daigan.record.data.model.ShortWorkOrder
 import com.daigan.record.data.model.TodayHostingOrder
 import com.daigan.record.data.model.UndoResult
 import com.daigan.record.data.repository.OrderRepository
+import com.daigan.record.data.preferences.UiPreferenceStore
 import com.daigan.record.data.repository.StaleOccurrenceException
 import com.daigan.record.data.repository.toDisplayedSnapshot
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,12 +43,41 @@ data class TodayUiState(
     val lastBatchId: String? = null,
     val undoResult: UndoResult? = null,
     val completedExpanded: Boolean = false,
+    /** Order-colour filter (UF-028); colour is set on the order, never here. */
+    val colorFilter: TodayColorFilter = TodayColorFilter.All,
+    val groups: Map<String, String> = emptyMap(),
 ) {
+    /** Hosting orders the current colour filter keeps visible. */
+    val filteredHosting: List<TodayHostingOrder>
+        get() = TodayColorFiltering.hosting(hosting, colorFilter)
+
+    val filteredShortOrders: List<ShortWorkOrder>
+        get() = TodayColorFiltering.short(shortOrders, colorFilter)
+
     val activeHosting: List<TodayHostingOrder>
-        get() = hosting.filter { !it.allTasksCompleted || it.expired }
+        // Expired orders remain available in order details/history, but no longer
+        // occupy the default daily-work list after their service date ends.
+        // A count-based order leaves this list only when its agreed rounds are done.
+        get() = filteredHosting.filter { !it.expired && !it.allTasksCompleted && !it.sessionsComplete }
 
     val completedHosting: List<TodayHostingOrder>
-        get() = hosting.filter { it.allTasksCompleted && !it.expired }
+        get() = filteredHosting.filter {
+            !it.expired && (it.allTasksCompleted || it.sessionsComplete)
+        }
+
+    /**
+     * Colours present in today's work, in palette order (chips stay compact). The active
+     * filter colour is kept even when it currently matches nothing, so its chip does not
+     * vanish while the list is filtered by it.
+     */
+    val usedColors: List<com.daigan.record.ui.theme.OrderColorOption>
+        get() {
+            val used = hosting.map { it.order.colorArgb } + shortOrders.map { it.order.colorArgb }
+            val active = (colorFilter as? TodayColorFilter.Matched)?.argb
+            return com.daigan.record.ui.theme.OrderColors.usedBy(
+                if (active == null) used else used + active,
+            )
+        }
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -55,6 +85,7 @@ data class TodayUiState(
 class TodayViewModel @Inject constructor(
     private val timeProvider: TimeProvider,
     private val orderRepository: OrderRepository,
+    private val preferences: UiPreferenceStore,
 ) : ViewModel() {
 
     private val selectedTab = MutableStateFlow(TodayTab.HOSTING)
@@ -64,6 +95,7 @@ class TodayViewModel @Inject constructor(
     private val lastBatchId = MutableStateFlow<String?>(null)
     private val undoResult = MutableStateFlow<UndoResult?>(null)
     private val completedExpanded = MutableStateFlow(false)
+    private val colorFilter = MutableStateFlow<TodayColorFilter>(TodayColorFilter.All)
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages
@@ -76,7 +108,7 @@ class TodayViewModel @Inject constructor(
             ) { hosting, short -> hosting to short }
         }
 
-    val uiState: StateFlow<TodayUiState> = combine(
+    private val baseUiState = combine(
         selectedTab,
         work,
         lastBatchId,
@@ -94,6 +126,12 @@ class TodayViewModel @Inject constructor(
             completedExpanded = expanded,
         )
     }
+
+    val uiState: StateFlow<TodayUiState> = combine(
+        baseUiState,
+        colorFilter,
+        preferences.observeTodayGroups(),
+    ) { state, filter, groups -> state.copy(colorFilter = filter, groups = groups) }
         .catch { error ->
             emit(
                 TodayUiState(
@@ -122,9 +160,21 @@ class TodayViewModel @Inject constructor(
         completedExpanded.value = !completedExpanded.value
     }
 
+    /**
+     * Colour filtering only. Assigning a colour happens on the order detail page
+     * (UF-028), so this page can no longer recolour a whole account by mistake.
+     */
+    fun setColorFilter(filter: TodayColorFilter) {
+        colorFilter.value = filter
+    }
+
+    fun setTaskGroup(key: String, group: String?) = viewModelScope.launch { preferences.setTodayGroup(key, group) }
+
     fun completeAllHosting() {
         val operationId = UUID.randomUUID().toString()
-        val displayed = uiState.value.hosting.map { it.toDisplayedSnapshot() }
+        // Only what the current colour filter shows is completed: a hidden order must not
+        // be affected by a bulk action the user cannot see.
+        val displayed = uiState.value.filteredHosting.map { it.toDisplayedSnapshot() }
         launchBatchAction {
             runCatching { orderRepository.completeAllHosting(operationId, displayed) }
                 .onSuccess { result ->
@@ -133,7 +183,12 @@ class TodayViewModel @Inject constructor(
                         if (result.alreadyApplied) {
                             "该批量操作已经生效"
                         } else {
-                            "已完成 ${result.completedCount} 项托管任务"
+                            "已完成 ${result.completedCount} 项托管任务" +
+                                if (result.skippedCount > 0) {
+                                    "，跳过 ${result.skippedCount} 项累计目标（需输入真实总值）"
+                                } else {
+                                    ""
+                                }
                         },
                     )
                 }
@@ -143,7 +198,7 @@ class TodayViewModel @Inject constructor(
 
     fun completeHostingOrder(orderId: String) {
         val operationId = UUID.randomUUID().toString()
-        val displayed = uiState.value.hosting
+        val displayed = uiState.value.filteredHosting
             .firstOrNull { it.order.id == orderId }
             ?.toDisplayedSnapshot()
         launchBatchAction {
@@ -154,7 +209,14 @@ class TodayViewModel @Inject constructor(
             }
                 .onSuccess { result ->
                     if (result.completedCount > 0) lastBatchId.value = result.batchId
-                    _messages.tryEmit("该单已完成 ${result.completedCount} 项")
+                    _messages.tryEmit(
+                        "该单已完成 ${result.completedCount} 项" +
+                            if (result.skippedCount > 0) {
+                                "，跳过 ${result.skippedCount} 项累计目标（请在订单详情记录当前总值）"
+                            } else {
+                                ""
+                            },
+                    )
                 }
                 .onFailure { refreshAfterStale(it, "整单完成失败") }
         }

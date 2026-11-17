@@ -33,6 +33,13 @@ object DatasetGate {
     /** Called inside the exclusive section after the durable replacement commits. */
     fun datasetReplaced() { generation++ }
 
+    /**
+     * The current dataset identity. A form captures this when it opens and passes it
+     * back to the write command; a restore in between makes the submission stale even
+     * when every stable business id still exists afterwards.
+     */
+    fun currentGeneration(): Long = generation
+
     suspend fun enterWrite() {
         val requestedGeneration = generation
         while (true) {

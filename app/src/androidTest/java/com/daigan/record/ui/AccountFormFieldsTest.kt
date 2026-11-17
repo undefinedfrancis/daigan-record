@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
@@ -156,8 +157,8 @@ class AccountFormFieldsTest {
                 )
             }
         }
-        composeTestRule.onNodeWithText("模拟器").assertIsDisplayed()
-        composeTestRule.onNodeWithText("扫码登录").assertIsDisplayed()
+        composeTestRule.onNodeWithText("模拟器").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("扫码登录").performScrollTo().assertIsDisplayed()
     }
 
     @Test

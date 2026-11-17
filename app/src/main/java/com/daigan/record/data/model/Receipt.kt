@@ -10,6 +10,10 @@ const val RECEIPT_REASON_MAX_LENGTH = 200
 enum class PaymentChannel(val label: String) {
     WECHAT("微信"),
     ALIPAY("支付宝"),
+    // Added for the shared interop contract (schema 15). Values are persisted by NAME,
+    // so existing rows and old backups are unaffected.
+    BANK("银行转账"),
+    CASH("现金"),
     OTHER("其他"),
     ;
 
@@ -23,7 +27,10 @@ enum class PaymentChannel(val label: String) {
  * A receipt is never deleted. A correction voids or replaces the row, and both states
  * stay visible in history. Only [ACTIVE] receipts count toward paid and outstanding.
  */
-enum class ReceiptStatus { ACTIVE, VOIDED, REPLACED }
+// Declaration order matches the shared interop contract so emitted metadata and the
+// contract agree positionally. Values are persisted by NAME, so this reorder is
+// behaviour-neutral for existing rows.
+enum class ReceiptStatus { ACTIVE, REPLACED, VOIDED }
 
 /**
  * One real money movement tied to an order and, for hosting orders, to exactly one
@@ -49,7 +56,7 @@ data class Receipt(
     val voided: Boolean get() = status == ReceiptStatus.VOIDED
 }
 
-enum class ReceiptCorrectionKind { VOID, AMEND }
+enum class ReceiptCorrectionKind { AMEND, VOID }
 
 /**
  * Immutable audit row for a receipt correction. `previous*` records exactly what the
@@ -138,14 +145,16 @@ data class ReceiptHistoryEntry(
     val periodStart: LocalDate?,
     val periodEnd: LocalDate?,
     val correctedToCents: Long?,
+    /** 打卡式托管: the container period has no business dates to show. */
+    val countBased: Boolean = false,
 ) {
     val hosting: Boolean get() = orderType == OrderType.HOSTING
 
     val periodLabel: String
-        get() = if (!hosting) {
-            "短期订单"
-        } else {
-            "第 ${(periodIndex ?: 0) + 1} 期" + if (periodStart != null && periodEnd != null) {
+        get() = when {
+            !hosting -> "短期订单"
+            countBased -> "打卡式托管"
+            else -> "第 ${(periodIndex ?: 0) + 1} 期" + if (periodStart != null && periodEnd != null) {
                 " · $periodStart – $periodEnd"
             } else {
                 ""

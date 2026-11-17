@@ -6,15 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.daigan.record.core.time.GameCalendar
 import com.daigan.record.core.time.GameRefreshRules
 import com.daigan.record.core.time.TimeProvider
+import com.daigan.record.data.model.CountHosting
 import com.daigan.record.data.model.GameAccount
 import com.daigan.record.data.model.GameTemplate
 import com.daigan.record.data.model.GameTemplateSummary
+import com.daigan.record.data.model.HostingMode
 import com.daigan.record.data.model.HostingOrderDraft
 import com.daigan.record.data.model.InitialPaymentDraft
 import com.daigan.record.data.model.Money
 import com.daigan.record.data.model.OrderCommandFingerprint
 import com.daigan.record.data.model.OrderTemplateProvenance
+import com.daigan.record.data.model.TemplateTitleRule
+import com.daigan.record.data.model.TemplatePricePreset
 import com.daigan.record.data.model.OrderType
+import com.daigan.record.data.model.parseMonthlyDates
 import com.daigan.record.data.model.Owner
 import com.daigan.record.data.model.PaymentChannel
 import com.daigan.record.data.model.PaymentMode
@@ -51,6 +56,10 @@ data class NewOrderUiState(
     val owner: Owner? = null,
     val account: GameAccount? = null,
     val type: OrderType = OrderType.HOSTING,
+    /** 托管方式：按日期（原有）或打卡式（按次数，UF-033）。 */
+    val hostingMode: HostingMode = HostingMode.DATE_RANGE,
+    /** Text of the agreed check-in rounds; validated only in count-based mode. */
+    val targetSessionsText: String = CountHosting.DEFAULT_TARGET_SESSIONS.toString(),
     val title: String = "日常托管",
     val priceYuan: String = "",
     val paymentMode: PaymentMode = PaymentMode.ONE_TIME,
@@ -59,10 +68,14 @@ data class NewOrderUiState(
     val startDate: LocalDate = LocalDate.now(),
     val endDate: LocalDate = LocalDate.now().plusDays(29),
     val durationText: String = "30",
+    val serviceDayMode: Boolean = false,
+    val serviceWeekdays: Set<DayOfWeek> = setOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY),
     val zoneText: String = ZoneId.systemDefault().id,
     val dailyRefresh: LocalTime = LocalTime.of(4, 0),
     val weeklyRefreshDay: DayOfWeek = DayOfWeek.MONDAY,
     val weeklyRefreshTime: LocalTime = LocalTime.of(5, 0),
+    /** 每月刷新日（逗号分隔 1–31）；空白表示按周刷新。 */
+    val monthlyRefreshDaysText: String = "",
     val tasks: List<TaskDraft> = listOf(TaskDraft()),
     val initialPaymentEnabled: Boolean = false,
     val initialAmountYuan: String = "",
@@ -76,6 +89,13 @@ data class NewOrderUiState(
     val selectedTemplateName: String? = null,
     val selectedTemplateVersion: String? = null,
     val templateNotice: String? = null,
+    /**
+     * Price options carried by the currently applied template. A dropdown only; the
+     * price field stays editable and is never filled by applying a template alone.
+     */
+    val templatePricePresets: List<TemplatePricePreset> = emptyList(),
+    /** The preset the price field currently matches, or null when the price is hand typed. */
+    val selectedPricePresetId: String? = null,
     val formErrors: Map<String, String> = emptyMap(),
     val saveError: String? = null,
     val saving: Boolean = false,
@@ -94,7 +114,10 @@ data class NewOrderUiState(
 ) {
     val errorMessages: List<String> get() = formErrors.values.distinct()
     val isShort: Boolean get() = type == OrderType.SHORT_TASK
+    val countBased: Boolean get() = hostingMode == HostingMode.COUNT_BASED
+    val targetSessionsOrNull: Int? get() = targetSessionsText.trim().toIntOrNull()
     val isCreated: Boolean get() = createdOrderId != null
+    val hasPricePresets: Boolean get() = templatePricePresets.isNotEmpty()
 
     val priceCentsOrNull: Long? get() = Money.parseYuanToCentsOrNull(priceYuan)
     val initialCentsOrNull: Long? get() = Money.parsePositiveYuanToCentsOrNull(initialAmountYuan)
@@ -148,6 +171,15 @@ class NewOrderViewModel @Inject constructor(
      * the exact tasks from the pending command instead of re-applying a template.
      */
     private var lastAppliedTasks: List<TaskDraft>? = null
+
+    /**
+     * Form-local record of the last title the app auto-filled (UF-036): the built-in
+     * type defaults and any applied template default. A title that differs from this
+     * record is a manual edit and is never overwritten by later template defaults.
+     * Pure UI memory; never persisted or exported.
+     */
+    private var lastAutoAppliedTitle: String? = "日常托管"
+
     private var restoredPendingCommand = false
     private var explicitShortCalendar = true
     private var templateIntent = 0L
@@ -209,9 +241,14 @@ class NewOrderViewModel @Inject constructor(
         if (!canApplyTemplate(intent, type)) return
         applyTemplateDefaults(template, type)
         _uiState.update {
+            // A mixed-category conflict must stay visible: it changes what the user has
+            // to decide, unlike the plain "defaults were filled" reassurance.
+            val conflictNotice = it.templateNotice?.takeIf { notice -> notice.contains("不一致") }
             it.copy(
-                templateNotice = "已按账号默认模板填入「${template.gameName} · " +
-                    "${template.templateVersion}」；可随时修改或清除。",
+                templateNotice = conflictNotice ?: (
+                    "已按账号默认模板填入「${template.gameName} · " +
+                        "${template.templateVersion}」；可随时修改或清除。"
+                    ),
             )
         }
     }
@@ -234,6 +271,12 @@ class NewOrderViewModel @Inject constructor(
         _uiState.update { current ->
             current.copy(
                 type = if (form.isShort) OrderType.SHORT_TASK else OrderType.HOSTING,
+                // A restored command keeps the exact mode/count it was submitted with;
+                // a payload written before count-based hosting restores date mode.
+                hostingMode = form.hostingMode,
+                targetSessionsText = form.targetSessionsText.ifBlank {
+                    CountHosting.DEFAULT_TARGET_SESSIONS.toString()
+                },
                 title = form.title,
                 priceYuan = form.priceYuan,
                 paymentMode = form.paymentMode,
@@ -242,10 +285,13 @@ class NewOrderViewModel @Inject constructor(
                 startDate = form.startDate,
                 endDate = form.endDate,
                 durationText = form.durationText,
+                serviceDayMode = form.serviceDayMode,
+                serviceWeekdays = form.serviceWeekdays,
                 zoneText = form.zoneText,
                 dailyRefresh = form.dailyRefresh,
                 weeklyRefreshDay = form.weeklyRefreshDay,
                 weeklyRefreshTime = form.weeklyRefreshTime,
+                monthlyRefreshDaysText = form.monthlyRefreshDaysText,
                 tasks = form.tasks,
                 initialPaymentEnabled = form.initialPaymentEnabled,
                 initialAmountYuan = form.initialAmountYuan,
@@ -255,6 +301,10 @@ class NewOrderViewModel @Inject constructor(
                 selectedTemplateId = form.sourceTemplateId,
                 selectedTemplateName = form.sourceTemplateName,
                 selectedTemplateVersion = form.sourceTemplateVersion,
+                // A restored command fixes its own price and carries no preset list, so
+                // nothing here may claim a preset is selected or offer a stale dropdown.
+                templatePricePresets = emptyList(),
+                selectedPricePresetId = null,
             )
         }
     }
@@ -287,16 +337,21 @@ class NewOrderViewModel @Inject constructor(
         val mayReapply = previous.selectedTemplateId != null &&
             lastAppliedTasks != null &&
             previous.tasks == lastAppliedTasks
+        // A default-only title (built-in type default or last auto fill) follows the new
+        // order type; a manually edited title is kept exactly as typed.
+        val previousTitle = previous.title
+        val defaultOnlyTitle = previousTitle == lastAutoAppliedTitle ||
+            previousTitle == "日常托管" || previousTitle == "短期任务"
+        val newTitle = when {
+            type == OrderType.HOSTING && defaultOnlyTitle -> "日常托管"
+            type == OrderType.SHORT_TASK && defaultOnlyTitle -> "短期任务"
+            else -> previousTitle
+        }
+        if (newTitle != previousTitle) lastAutoAppliedTitle = newTitle
         _uiState.update { state ->
-            val defaultHosting = state.title == "日常托管"
-            val defaultShort = state.title == "短期任务"
             state.copy(
                 type = type,
-                title = when {
-                    type == OrderType.HOSTING && defaultShort -> "日常托管"
-                    type == OrderType.SHORT_TASK && defaultHosting -> "短期任务"
-                    else -> state.title
-                },
+                title = newTitle,
                 formErrors = emptyMap(),
                 saveError = null,
             )
@@ -349,6 +404,8 @@ class NewOrderViewModel @Inject constructor(
                 selectedTemplateId = null,
                 selectedTemplateName = null,
                 selectedTemplateVersion = null,
+                templatePricePresets = emptyList(),
+                selectedPricePresetId = null,
                 templateNotice = "已清除模板默认值；当前任务仍可继续编辑。",
             )
         }
@@ -382,27 +439,143 @@ class NewOrderViewModel @Inject constructor(
         explicitShortCalendar = true
         val tasks = applicable.map { it.toTaskDraft() }
         lastAppliedTasks = tasks
+        // UF-036: the template default order title fills only an untouched title. A
+        // manual edit always wins, a blank default never clears, and clearing the title
+        // makes later automatic application possible again.
+        val currentTitle = _uiState.value.title
+        val resolvedTitle = TemplateTitleRule.resolveOrderTitle(
+            currentTitle = currentTitle,
+            lastAutoApplied = lastAutoAppliedTitle,
+            defaultTitle = template.defaultOrderTitle,
+        )
+        lastAutoAppliedTitle = TemplateTitleRule.nextProvenance(
+            currentTitle = currentTitle,
+            lastAutoApplied = lastAutoAppliedTitle,
+            defaultTitle = template.defaultOrderTitle,
+        )
+        // Category defaults are resolved once: an explicit template mode wins, otherwise
+        // the categories' consensus applies, and a disagreement keeps the user's current
+        // choice instead of silently picking the first category.
+        val defaults = template.serviceDefaults
+        val hostingDefaults = type == OrderType.HOSTING
+        val effectiveMode = if (hostingDefaults) defaults.hostingMode else null
+        val targetSessions = when {
+            effectiveMode == HostingMode.COUNT_BASED ->
+                (defaults.targetSessions ?: CountHosting.DEFAULT_TARGET_SESSIONS).toString()
+
+            else -> _uiState.value.targetSessionsText
+        }
+        val serviceWeekdays = when {
+            effectiveMode == HostingMode.DATE_RANGE -> defaults.serviceWeekdays
+            effectiveMode == HostingMode.COUNT_BASED -> emptySet()
+            else -> _uiState.value.serviceWeekdays
+        }
+        val serviceDayMode = when {
+            effectiveMode == HostingMode.COUNT_BASED -> false
+            effectiveMode == HostingMode.DATE_RANGE -> defaults.serviceWeekdays.isNotEmpty()
+            else -> _uiState.value.serviceDayMode
+        }
         _uiState.update {
             it.copy(
+                title = resolvedTitle,
                 tasks = tasks,
                 zoneText = template.refresh.zoneId.id,
                 dailyRefresh = template.refresh.dailyRefresh,
                 weeklyRefreshDay = template.refresh.weeklyRefreshDay,
                 weeklyRefreshTime = template.refresh.weeklyRefreshTime,
+                // Monthly refresh days belong to the order's refresh intent; a template
+                // carries weekly rules only, so the user's monthly input is preserved.
+                monthlyRefreshDaysText = it.monthlyRefreshDaysText,
                 selectedTemplateId = template.id,
                 selectedTemplateName = template.gameName,
                 selectedTemplateVersion = template.templateVersion,
+                templatePricePresets = template.pricePresets.sortedBy { it.sortOrder },
+                // Selecting a template never fills the price: the field keeps whatever the
+                // user typed, and nothing is claimed to be "the preset" until they pick one.
+                selectedPricePresetId = null,
+                // UF-034: the template's hosting mode and agreed round count are copied
+                // as creation defaults. The user can still adjust them before saving,
+                // and the created order keeps its own snapshot.
+                hostingMode = effectiveMode ?: it.hostingMode,
+                targetSessionsText = targetSessions,
+                // An explicit mode overrides incompatible inherited values: count mode
+                // clears the service-day plan; an explicit date range clears it unless the
+                // category declares service weekdays.
+                serviceWeekdays = serviceWeekdays,
+                serviceDayMode = serviceDayMode,
                 templateNotice = "已填入「${template.gameName} · ${template.templateVersion}」" +
-                    "的 ${tasks.size} 项任务与刷新规则；仍可修改。",
+                    "的 ${tasks.size} 项任务与刷新规则" +
+                    when {
+                        !hostingDefaults -> ""
+                        defaults.conflict ->
+                            "；该模板各分类的托管方式不一致，请手动选择托管方式"
+
+                        effectiveMode == HostingMode.COUNT_BASED -> "，打卡式托管" +
+                            "目标 ${defaults.targetSessions ?: CountHosting.DEFAULT_TARGET_SESSIONS} 次"
+
+                        effectiveMode == HostingMode.DATE_RANGE && defaults.serviceWeekdays.isNotEmpty() ->
+                            "，按日期托管（仅服务星期）"
+
+                        else -> "，按日期托管"
+                    } + "；仍可修改。",
                 formErrors = emptyMap(),
                 saveError = null,
             )
         }
     }
 
+    /**
+     * Switches the hosting mode. Count-based mode has no date/ weekday input, so the
+     * service-day switch is turned off and the date fields are simply left unused
+     * (never converted into a fabricated range).
+     */
+    fun selectHostingMode(mode: HostingMode) {
+        val state = _uiState.value
+        if (state.saving || state.isCreated || state.hostingMode == mode) return
+        invalidateTemplateReads()
+        _uiState.update {
+            it.copy(
+                hostingMode = mode,
+                serviceDayMode = if (mode == HostingMode.COUNT_BASED) false else it.serviceDayMode,
+                formErrors = emptyMap(),
+                saveError = null,
+            )
+        }
+    }
+
+    fun updateTargetSessions(value: String) = _uiState.update {
+        it.copy(targetSessionsText = value, formErrors = emptyMap(), saveError = null)
+    }
+
     fun updateTitle(value: String) = _uiState.update { it.copy(title = value) }
 
-    fun updatePrice(value: String) = _uiState.update { it.copy(priceYuan = value) }
+    fun updatePrice(value: String) = _uiState.update { state ->
+        val selected = state.templatePricePresets
+            .firstOrNull { it.id == state.selectedPricePresetId }
+        // Hand-typed text detaches from the preset even when the digits happen to match,
+        // so the next edit is never attributed to a preset the user did not re-pick.
+        val stillSelected = selected != null &&
+            value == Money.centsToYuanText(selected.amountCents)
+        state.copy(
+            priceYuan = value,
+            selectedPricePresetId = selected?.takeIf { stillSelected }?.id,
+        )
+    }
+
+    /**
+     * Fills the price field from one of the current template's presets. An unknown id is
+     * ignored rather than blanking the field, so a stale dropdown tap cannot erase work.
+     */
+    fun selectPricePreset(presetId: String) {
+        if (_uiState.value.saving || _uiState.value.isCreated) return
+        val preset = _uiState.value.templatePricePresets.firstOrNull { it.id == presetId } ?: return
+        _uiState.update {
+            it.copy(
+                priceYuan = Money.centsToYuanText(preset.amountCents),
+                selectedPricePresetId = preset.id,
+            )
+        }
+    }
 
     fun selectPaymentMode(mode: PaymentMode) = _uiState.update {
         it.copy(paymentMode = mode, formErrors = emptyMap(), saveError = null)
@@ -428,6 +601,9 @@ class NewOrderViewModel @Inject constructor(
     fun updateNotes(value: String) = _uiState.update { it.copy(notes = value) }
 
     fun setDeadline(date: LocalDate?) = _uiState.update { it.copy(deadlineDate = date) }
+
+    fun setServiceDayMode(enabled: Boolean) { _uiState.update { it.copy(serviceDayMode = enabled) } }
+    fun toggleServiceWeekday(day: DayOfWeek) { _uiState.update { it.copy(serviceWeekdays = if (day in it.serviceWeekdays) it.serviceWeekdays - day else it.serviceWeekdays + day) } }
 
     fun setStartDate(date: LocalDate) {
         _uiState.update { state ->
@@ -485,6 +661,12 @@ class NewOrderViewModel @Inject constructor(
         _uiState.update { it.copy(weeklyRefreshTime = time) }
     }
 
+    fun setMonthlyRefreshDaysText(value: String) {
+        invalidateTemplateReads()
+        explicitShortCalendar = true
+        _uiState.update { it.copy(monthlyRefreshDaysText = value) }
+    }
+
     fun addTask() {
         invalidateTemplateReads()
         _uiState.update { it.copy(tasks = it.tasks + TaskDraft()) }
@@ -532,6 +714,17 @@ class NewOrderViewModel @Inject constructor(
         // Gate first: everything below runs synchronously on the main thread.
         _uiState.update { it.copy(saving = true, formErrors = emptyMap(), saveError = null) }
 
+        if (state.monthlyRefreshDaysText.isNotBlank() &&
+            parseMonthlyDates(state.monthlyRefreshDaysText) == null
+        ) {
+            _uiState.update {
+                it.copy(
+                    saving = false,
+                    formErrors = mapOf("monthlyRefresh" to "每月刷新日需为 1–31，可用逗号分隔多个日期"),
+                )
+            }
+            return
+        }
         var creationOperationId = stableCreationOperationId()
         var initialPaymentOperationId = stableInitialPaymentOperationId()
         var draft = buildDraft(state, creationOperationId, initialPaymentOperationId)
@@ -653,11 +846,17 @@ class NewOrderViewModel @Inject constructor(
         initialPaymentOperationId: String,
     ): Any? {
         val zone = runCatching { ZoneId.of(state.zoneText.trim()) }.getOrNull() ?: return null
+        val monthlyDays = if (state.monthlyRefreshDaysText.isBlank()) {
+            emptySet()
+        } else {
+            parseMonthlyDates(state.monthlyRefreshDaysText) ?: return null
+        }
         val refresh = GameRefreshRules(
             zoneId = zone,
             dailyRefresh = state.dailyRefresh,
             weeklyRefreshDay = state.weeklyRefreshDay,
             weeklyRefreshTime = state.weeklyRefreshTime,
+            monthlyRefreshDays = monthlyDays,
         )
         val initialPayment = if (state.initialPaymentEnabled) {
             InitialPaymentDraft(
@@ -714,6 +913,20 @@ class NewOrderViewModel @Inject constructor(
                 initialPayment = initialPayment,
                 sourceTemplate = provenance,
                 creationOperationId = creationOperationId,
+                // A count-based order has no service-day plan; the date fields above stay
+                // as inert defaults and are ignored by validation and persistence.
+                serviceDays = if (state.serviceDayMode && !state.countBased) {
+                    state.durationText.toIntOrNull() ?: 0
+                } else {
+                    null
+                },
+                serviceWeekdays = if (state.serviceDayMode && !state.countBased) {
+                    state.serviceWeekdays
+                } else {
+                    emptySet()
+                },
+                hostingMode = state.hostingMode,
+                targetSessions = if (state.countBased) state.targetSessionsOrNull else null,
             )
         }
     }
@@ -738,6 +951,8 @@ class NewOrderViewModel @Inject constructor(
 
     private fun NewOrderUiState.toRestoredForm(): RestoredOrderForm = RestoredOrderForm(
         isShort = isShort,
+        hostingMode = hostingMode,
+        targetSessionsText = targetSessionsText,
         title = title,
         priceYuan = priceYuan,
         paymentMode = paymentMode,
@@ -746,10 +961,13 @@ class NewOrderViewModel @Inject constructor(
         startDate = startDate,
         endDate = endDate,
         durationText = durationText,
+        serviceDayMode = serviceDayMode,
+        serviceWeekdays = serviceWeekdays,
         zoneText = zoneText,
         dailyRefresh = dailyRefresh,
         weeklyRefreshDay = weeklyRefreshDay,
         weeklyRefreshTime = weeklyRefreshTime,
+        monthlyRefreshDaysText = monthlyRefreshDaysText,
         tasks = tasks,
         initialPaymentEnabled = initialPaymentEnabled,
         initialAmountYuan = initialAmountYuan,

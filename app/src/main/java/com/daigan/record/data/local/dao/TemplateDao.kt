@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.daigan.record.data.local.entity.GameTemplateEntity
 import com.daigan.record.data.local.entity.TemplateCategoryEntity
+import com.daigan.record.data.local.entity.TemplatePricePresetEntity
 import com.daigan.record.data.local.entity.TemplateSeedStateEntity
 import com.daigan.record.data.local.entity.TemplateTaskEntity
 import kotlinx.coroutines.flow.Flow
@@ -50,6 +51,24 @@ interface TemplateDao {
     )
     suspend fun findTasks(templateId: String): List<TemplateTaskEntity>
 
+    @Query(
+        "SELECT * FROM template_price_presets WHERE templateId = :templateId " +
+            "ORDER BY sortOrder ASC, id ASC",
+    )
+    suspend fun findPricePresets(templateId: String): List<TemplatePricePresetEntity>
+
+    @Query("SELECT * FROM template_price_presets ORDER BY templateId ASC, sortOrder ASC, id ASC")
+    suspend fun findAllPricePresets(): List<TemplatePricePresetEntity>
+
+    @Query("SELECT id FROM template_price_presets")
+    suspend fun allPricePresetIds(): List<String>
+
+    @Query(
+        "SELECT * FROM template_price_presets " +
+            "ORDER BY templateId ASC, sortOrder ASC, id ASC",
+    )
+    fun observePricePresets(): Flow<List<TemplatePricePresetEntity>>
+
     /** Typed full reads used by backup validation (they run every converter). */
     @Query("SELECT * FROM template_categories")
     suspend fun findAllCategories(): List<TemplateCategoryEntity>
@@ -81,8 +100,14 @@ interface TemplateDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertTasks(tasks: List<TemplateTaskEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPricePresets(presets: List<TemplatePricePresetEntity>)
+
     @Query("DELETE FROM template_tasks WHERE templateId = :templateId")
     suspend fun deleteTasks(templateId: String)
+
+    @Query("DELETE FROM template_price_presets WHERE templateId = :templateId")
+    suspend fun deletePricePresets(templateId: String)
 
     @Query("DELETE FROM template_categories WHERE templateId = :templateId")
     suspend fun deleteCategories(templateId: String)

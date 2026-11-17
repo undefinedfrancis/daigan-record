@@ -1,10 +1,15 @@
 package com.daigan.record.data.template
 
 import com.daigan.record.data.model.GameTemplate
+import com.daigan.record.data.model.HostingMode
+import com.daigan.record.data.model.Money
+import com.daigan.record.data.model.NumericMode
 import com.daigan.record.data.model.ProgressType
 import com.daigan.record.data.model.RecurrenceType
 import com.daigan.record.data.model.TemplateCategoryDraft
 import com.daigan.record.data.model.TemplateDraft
+import com.daigan.record.data.model.TemplatePricePreset
+import com.daigan.record.data.model.TemplatePricePresetDraft
 import com.daigan.record.data.model.TemplateTaskDraft
 import java.math.BigDecimal
 import java.nio.ByteBuffer
@@ -14,6 +19,7 @@ import java.time.DayOfWeek
 import java.time.LocalTime
 import java.time.format.DateTimeParseException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -22,6 +28,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -65,7 +72,26 @@ data class TemplateFileContent(
 object TemplateFileCodec {
 
     const val FORMAT_NAME = "daigan-template"
-    const val FORMAT_VERSION = 1
+
+    /**
+     * Version history:
+     * 1 — the original template content plus optional per-game 区服 options.
+     * 2 — adds the optional per-template price presets (`pricePresets`).
+     * 3 — adds the optional hosting mode and agreed round count (`hostingMode`,
+     *     `targetSessions`), so a 打卡式托管 template survives export/import.
+     * 4 — the shared interop contract: category-level service defaults
+     *     (`hostingMode`/`targetSessions`/`serviceWeekdays`), template-level
+     *     `serviceWeekdays`/`defaultOrderTitle`, and task-level
+     *     `activeFrom`/`activeUntil`/`numericMode`.
+     *
+     * Every version from 1 stays readable through the historical key sets declared
+     * below; v4 writers and readers reject unknown keys at every level. A template file
+     * never carries account categories, account ids, order ids or progress history.
+     */
+    const val FORMAT_VERSION = 4
+
+    /** Oldest readable format version. A v1 file simply has no price presets. */
+    const val MIN_READABLE_FORMAT_VERSION = 1
 
     /** Hard byte limit for a template file; also enforced while reading the stream. */
     const val MAX_FILE_BYTES = 256 * 1024
@@ -80,40 +106,80 @@ object TemplateFileCodec {
         ignoreUnknownKeys = false
     }
 
-    private val templateKeys = setOf(
-        "id",
-        "gameName",
-        "templateVersion",
-        "gameVersionNotes",
-        "timeZone",
-        "dailyRefresh",
-        "weeklyRefreshDay",
-        "weeklyRefreshTime",
-        "categories",
-        "serverOptions",
-    )
-    private val categoryKeys = setOf("id", "name", "tasks")
-    private val taskKeys = setOf(
-        "id",
-        "categoryId",
-        "title",
-        "progressType",
-        "startValue",
-        "targetValue",
-        "unit",
-        "recurrence",
-        "weekdays",
-        "everyNDays",
-        "monthDay",
-    )
     private val rootKeys = setOf("format", "formatVersion", "template")
+    private val pricePresetKeys = setOf("id", "amountCents", "label")
+
+    /** 每个版本允许的模板键集；历史版本另行放行它们当年写过的键。 */
+    private fun templateKeysFor(version: Int): Set<String> {
+        val keys = mutableSetOf(
+            "id",
+            "gameName",
+            "templateVersion",
+            "gameVersionNotes",
+            "timeZone",
+            "dailyRefresh",
+            "weeklyRefreshDay",
+            "weeklyRefreshTime",
+            "categories",
+            "serverOptions",
+        )
+        if (version >= 2) keys += "pricePresets"
+        if (version >= 3) {
+            keys += "hostingMode"
+            keys += "targetSessions"
+        }
+        if (version >= 4) {
+            keys += "serviceWeekdays"
+            keys += "defaultOrderTitle"
+        } else {
+            // 网页 1/2 写过的 legacy 扩展键：只在历史版本里被接受。
+            keys += "serviceMode"
+            keys += "serviceCount"
+        }
+        return keys
+    }
+
+    private fun categoryKeysFor(version: Int): Set<String> = if (version >= 4) {
+        setOf("id", "name", "hostingMode", "targetSessions", "serviceWeekdays", "tasks")
+    } else {
+        setOf("id", "name", "tasks", "serviceMode", "serviceCount")
+    }
+
+    private fun taskKeysFor(version: Int): Set<String> {
+        val keys = mutableSetOf(
+            "id",
+            "categoryId",
+            "title",
+            "progressType",
+            "startValue",
+            "targetValue",
+            "unit",
+            "recurrence",
+            "weekdays",
+            "everyNDays",
+        )
+        if (version >= 2) {
+            keys += "monthDay"
+            keys += "monthDays"
+            keys += "activeFrom"
+            keys += "activeUntil"
+        }
+        if (version >= 4) keys += "numericMode"
+        return keys
+    }
 
     /**
-     * Encodes one template with its game's 区服 options. The options field is omitted
-     * when empty so pre-1.7 apps can still import option-less files; a non-empty list
-     * is written and rejected by strict old readers, which is intentional.
+     * Encodes one template with its game's 区服 options and its price presets. Both
+     * optional collections are omitted when empty, so a template that uses neither
+     * stays readable by an older build that only knows format version 1; a non-empty
+     * collection is written and rejected by those strict old readers, which is
+     * intentional — the data is not silently dropped.
      */
-    fun encode(template: GameTemplate, serverOptions: List<String> = emptyList()): ByteArray {
+    fun encode(
+        template: GameTemplate,
+        serverOptions: List<String> = emptyList(),
+        pricePresets: List<TemplatePricePreset> = template.pricePresets,
+    ): ByteArray {
         val root = buildJsonObject {
             put("format", FORMAT_NAME)
             put("formatVersion", FORMAT_VERSION)
@@ -126,12 +192,42 @@ object TemplateFileCodec {
                 put("dailyRefresh", minutesToText(template.refresh.dailyRefreshMinutes))
                 put("weeklyRefreshDay", template.refresh.weeklyRefreshDay.name)
                 put("weeklyRefreshTime", minutesToText(template.refresh.weeklyRefreshMinutes))
+                // 模板级 = 分类共识镜像；DATE_RANGE 是显式按日期，null 只在"无意见"时使用。
+                put(
+                    "hostingMode",
+                    template.hostingMode?.name?.let(::JsonPrimitive) ?: JsonNull,
+                )
+                if (template.hostingMode == HostingMode.COUNT_BASED) {
+                    put("targetSessions", template.targetSessions?.let(::JsonPrimitive) ?: JsonNull)
+                } else {
+                    put("targetSessions", JsonNull)
+                }
+                put(
+                    "serviceWeekdays",
+                    template.serviceWeekdays?.let(::JsonPrimitive) ?: JsonNull,
+                )
+                put(
+                    "defaultOrderTitle",
+                    template.defaultOrderTitle?.takeIf { it.isNotBlank() }?.let(::JsonPrimitive) ?: JsonNull,
+                )
                 putJsonArray("categories") {
                     template.categories.forEach { category ->
                         add(
                             buildJsonObject {
                                 put("id", category.id)
                                 put("name", category.name)
+                                put(
+                                    "hostingMode",
+                                    category.hostingMode?.name?.let(::JsonPrimitive) ?: JsonNull,
+                                )
+                                put(
+                                    "targetSessions",
+                                    category.targetSessions?.let(::JsonPrimitive) ?: JsonNull,
+                                )
+                                put(
+                                    "serviceWeekdays",
+                                    category.serviceWeekdays?.let(::JsonPrimitive) ?: JsonNull,
+                                )
                                 putJsonArray("tasks") {
                                     category.tasks.forEach { task ->
                                         add(
@@ -152,9 +248,22 @@ object TemplateFileCodec {
                                                     },
                                                 )
                                                 put("monthDay", task.monthDay?.let(::JsonPrimitive) ?: JsonNull)
+                                                put("monthDays", buildJsonArray { task.monthDays.ifEmpty { setOfNotNull(task.monthDay) }.sorted().forEach { add(JsonPrimitive(it)) } })
                                                 put(
                                                     "everyNDays",
                                                     task.everyNDays?.let(::JsonPrimitive) ?: JsonNull,
+                                                )
+                                                put(
+                                                    "activeFrom",
+                                                    task.activeFrom?.toString()?.let(::JsonPrimitive) ?: JsonNull,
+                                                )
+                                                put(
+                                                    "activeUntil",
+                                                    task.activeUntil?.toString()?.let(::JsonPrimitive) ?: JsonNull,
+                                                )
+                                                put(
+                                                    "numericMode",
+                                                    task.numericMode?.name?.let(::JsonPrimitive) ?: JsonNull,
                                                 )
                                             },
                                         )
@@ -167,6 +276,28 @@ object TemplateFileCodec {
                 if (serverOptions.isNotEmpty()) {
                     putJsonArray("serverOptions") {
                         serverOptions.forEach { add(JsonPrimitive(it)) }
+                    }
+                }
+                if (pricePresets.isNotEmpty()) {
+                    putJsonArray("pricePresets") {
+                        pricePresets.sortedBy { it.sortOrder }.forEach { preset ->
+                            add(
+                                buildJsonObject {
+                                    put("id", preset.id)
+                                    // Integer cents, never a float: an exported amount
+                                    // must decode to exactly the price that was saved.
+                                    put("amountCents", preset.amountCents)
+                                    // Use an explicit branch: JsonObjectBuilder.put returns the
+                                    // previous value, so using it inside `?:` would overwrite a
+                                    // newly written non-empty label with JSON null.
+                                    if (preset.label != null) {
+                                        put("label", JsonPrimitive(preset.label))
+                                    } else {
+                                        put("label", JsonNull)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -201,15 +332,16 @@ object TemplateFileCodec {
             throw TemplateFileException("这不是本应用的模板文件（format=$format）")
         }
         val version = rootObject.requireInt("formatVersion")
-        if (version != FORMAT_VERSION) {
+        if (version !in MIN_READABLE_FORMAT_VERSION..FORMAT_VERSION) {
             throw TemplateFileException(
-                "不支持的模板文件格式版本 $version；本版本只支持 $FORMAT_VERSION",
+                "不支持的模板文件格式版本 $version；本版本支持 " +
+                    "$MIN_READABLE_FORMAT_VERSION–$FORMAT_VERSION",
             )
         }
         val template = rootObject["template"]
             ?.objectOrThrow("template 必须是对象")
             ?: throw TemplateFileException("缺少必填字段：template")
-        rejectUnknownKeys(template, templateKeys, "模板")
+        rejectUnknownKeys(template, templateKeysFor(version), "模板")
         val templateId = template.requireId("id")
         val gameName = template.requireString("gameName")
         val templateVersion = template.requireString("templateVersion")
@@ -237,7 +369,7 @@ object TemplateFileCodec {
         var taskTotal = 0
         val categories = categoriesArray.mapIndexed { index, element ->
             val category = element.objectOrThrow("第 ${index + 1} 个分类必须是对象")
-            rejectUnknownKeys(category, categoryKeys, "分类")
+            rejectUnknownKeys(category, categoryKeysFor(version), "分类")
             val categoryId = uniqueId(category.requireId("id"))
             val name = category.requireString("name")
             val tasksArray = category["tasks"]
@@ -253,9 +385,44 @@ object TemplateFileCodec {
             if (taskTotal > TemplateDraft.MAX_TASKS) {
                 throw TemplateFileException("任务总数超过 ${TemplateDraft.MAX_TASKS} 个上限")
             }
+            // 分类级默认值：v4 用 hostingMode/targetSessions/serviceWeekdays，
+            // 历史网页格式用 serviceMode/serviceCount，缺列表示继承模板（null）。
+            val legacyCategoryMode = category.optionalString("serviceMode")
+            val categoryHostingMode = when {
+                version >= 4 -> when (val raw = category.optionalString("hostingMode")) {
+                    null -> null
+                    HostingMode.DATE_RANGE.name -> HostingMode.DATE_RANGE
+                    HostingMode.COUNT_BASED.name -> HostingMode.COUNT_BASED
+                    else -> throw TemplateFileException("不支持的分类托管方式：$raw")
+                }
+
+                category.serviceModePresent() -> when (legacyCategoryMode) {
+                    // 存 null = 保存路径把 'dates' 归一而来 → 显式按日期，不是继承。
+                    null -> HostingMode.DATE_RANGE
+                    "weekdays" -> HostingMode.DATE_RANGE
+                    "count" -> HostingMode.COUNT_BASED
+                    else -> throw TemplateFileException("不支持的分类服务模式：$legacyCategoryMode")
+                }
+
+                else -> null
+            }
+            val categoryTargetSessions = if (version >= 4) {
+                category.optionalInt("targetSessions")
+            } else {
+                category.optionalInt("serviceCount")
+            }
+            if (categoryHostingMode == HostingMode.COUNT_BASED &&
+                (categoryTargetSessions == null || categoryTargetSessions < 1)
+            ) {
+                throw TemplateFileException("分类计次模式需要大于 0 的目标次数")
+            }
+            val categoryWeekdays = parseServiceWeekdays(category.optionalString("serviceWeekdays"))
+                ?: if (legacyCategoryMode == "weekdays") setOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY,
+                    DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY) else emptySet()
+
             val tasks = tasksArray.mapIndexed { taskIndex, taskElement ->
                 val task = taskElement.objectOrThrow("第 ${taskIndex + 1} 个任务必须是对象")
-                rejectUnknownKeys(task, taskKeys, "任务")
+                rejectUnknownKeys(task, taskKeysFor(version), "任务")
                 val taskId = uniqueId(task.requireId("id"))
                 val referencedCategory = task.requireString("categoryId")
                 if (referencedCategory != categoryId) {
@@ -273,12 +440,45 @@ object TemplateFileCodec {
                     recurrence = parseRecurrence(task.requireString("recurrence")),
                     weekdays = parseWeekdays(task),
                     everyNDays = task.optionalInt("everyNDays")?.toString().orEmpty(),
-                    monthDay = task.optionalInt("monthDay")?.toString().orEmpty(),
+                    monthDay = (task["monthDays"] as? JsonArray)?.joinToString(",") { it.jsonPrimitive.content }
+                        ?: task.optionalInt("monthDay")?.toString().orEmpty(),
+                    activeFrom = parseOptionalDateText(task.optionalString("activeFrom"), "任务生效起始日"),
+                    activeUntil = parseOptionalDateText(task.optionalString("activeUntil"), "任务生效截止日"),
+                    numericMode = parseNumericMode(task.optionalString("numericMode")),
                 )
             }
-            TemplateCategoryDraft(id = categoryId, name = name, tasks = tasks)
+            TemplateCategoryDraft(
+                id = categoryId,
+                name = name,
+                tasks = tasks,
+                hostingMode = categoryHostingMode,
+                targetSessionsText = categoryTargetSessions?.toString().orEmpty(),
+                serviceWeekdays = encodeWeekdays(categoryWeekdays),
+            )
         }
 
+        // 模板级默认值：v1–v2 没有该字段（按日期）；v3 起可携带计次目标；
+        // 历史网页格式还用 serviceMode/serviceCount 表达同一语义。
+        val legacyMode = template.optionalString("serviceMode")
+        val hostingMode = when (val raw = template.optionalString("hostingMode")) {
+            null -> if (legacyMode == "count") HostingMode.COUNT_BASED else HostingMode.DATE_RANGE
+            HostingMode.DATE_RANGE.name -> HostingMode.DATE_RANGE
+            HostingMode.COUNT_BASED.name -> HostingMode.COUNT_BASED
+            else -> throw TemplateFileException("不支持的托管方式：$raw")
+        }
+        val targetSessions = template.optionalInt("targetSessions")
+            ?: template.optionalInt("serviceCount")
+        if (hostingMode == HostingMode.COUNT_BASED && (targetSessions == null || targetSessions < 1)) {
+            throw TemplateFileException("打卡式托管需要大于 0 的目标次数")
+        }
+        val templateWeekdays = parseServiceWeekdays(template.optionalString("serviceWeekdays"))
+            ?: if (legacyMode == "weekdays") setOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY,
+                DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY) else emptySet()
+        val defaultOrderTitle = template.optionalString("defaultOrderTitle")
+            ?.trim()
+            ?.take(60)
+            ?.takeIf { it.isNotEmpty() }
+            .orEmpty()
         val draft = TemplateDraft(
             gameName = gameName,
             templateVersion = templateVersion,
@@ -288,6 +488,11 @@ object TemplateFileCodec {
             weeklyRefreshDay = weeklyDay,
             weeklyRefreshTime = weeklyTime,
             categories = categories,
+            pricePresets = parsePricePresets(template, ::uniqueId),
+            hostingMode = hostingMode,
+            targetSessionsText = targetSessions?.toString().orEmpty(),
+            serviceWeekdays = encodeWeekdays(templateWeekdays),
+            defaultOrderTitle = defaultOrderTitle,
         )
         val errors = draft.validate()
         if (errors.isNotEmpty()) {
@@ -325,6 +530,33 @@ object TemplateFileCodec {
             throw TemplateFileException("文件中的区服选项重复")
         }
         return options
+    }
+
+    /**
+     * Optional price presets (format 2). An absent field means "the file carries none"
+     * and decodes to an empty list, which is exactly what a version-1 file holds.
+     * Amounts are integer cents so an exported price decodes to the identical value;
+     * `draft.validate()` then applies the same money rules the editor uses.
+     */
+    private fun parsePricePresets(
+        template: JsonObject,
+        uniqueId: (String) -> String,
+    ): List<TemplatePricePresetDraft> {
+        val array = template["pricePresets"] as? JsonArray ?: return emptyList()
+        if (array.size > TemplateDraft.MAX_PRICE_PRESETS) {
+            throw TemplateFileException(
+                "价格预设数量超过 ${TemplateDraft.MAX_PRICE_PRESETS} 个上限",
+            )
+        }
+        return array.mapIndexed { index, element ->
+            val preset = element.objectOrThrow("第 ${index + 1} 个价格预设必须是对象")
+            rejectUnknownKeys(preset, pricePresetKeys, "价格预设")
+            TemplatePricePresetDraft(
+                id = uniqueId(preset.requireId("id")),
+                amountText = Money.centsToYuanText(preset.requireLong("amountCents")),
+                label = preset.optionalString("label").orEmpty(),
+            )
+        }
     }
 
     private fun parseProgressType(raw: String): ProgressType = when (raw) {
@@ -384,6 +616,42 @@ object TemplateFileCodec {
         "%02d:%02d".format(minutes / 60, minutes % 60)
 }
 
+/**
+ * 服务星期在文件里用 ISO 1–7 的逗号文本。非法值直接拒绝，绝不静默丢弃。
+ */
+internal fun parseServiceWeekdays(raw: String?): Set<DayOfWeek>? {
+    if (raw.isNullOrBlank()) return null
+    val days = raw.split(',').map { it.trim() }
+    if (days.isEmpty()) return null
+    return days.map { token ->
+        val value = token.toIntOrNull()
+        if (value == null || value !in 1..7) {
+            throw TemplateFileException("服务星期必须是 ISO 1–7：$token")
+        }
+        DayOfWeek.of(value)
+    }.toSet()
+}
+
+internal fun encodeWeekdays(days: Set<DayOfWeek>): String =
+    days.map { it.value }.sorted().joinToString(",")
+
+private fun parseOptionalDateText(raw: String?, label: String): String {
+    if (raw.isNullOrBlank()) return ""
+    val date = runCatching { java.time.LocalDate.parse(raw) }.getOrNull()
+        ?: throw TemplateFileException("$label 必须为 YYYY-MM-DD 日期")
+    return date.toString()
+}
+
+private fun parseNumericMode(raw: String?): NumericMode? = when (raw) {
+    null -> null
+    NumericMode.PER_OCCURRENCE.name -> NumericMode.PER_OCCURRENCE
+    NumericMode.CUMULATIVE.name -> NumericMode.CUMULATIVE
+    else -> throw TemplateFileException("不支持的数值口径：$raw")
+}
+
+/** 该对象是否真的声明了 `serviceMode`（用于区分"缺列"与"存 null"）。 */
+private fun JsonObject.serviceModePresent(): Boolean = containsKey("serviceMode")
+
 private class TemplateFileException(message: String) : Exception(message)
 
 private fun JsonElement.objectOrThrow(message: String): JsonObject =
@@ -432,6 +700,14 @@ private fun JsonObject.optionalInt(key: String): Int? {
     val primitive = element as? JsonPrimitive
         ?: throw TemplateFileException("字段 $key 必须是整数或 null")
     return primitive.intOrNull ?: throw TemplateFileException("字段 $key 必须是整数或 null")
+}
+
+private fun JsonObject.requireLong(key: String): Long {
+    val element = this[key] ?: throw TemplateFileException("缺少必填字段：$key")
+    val primitive = element as? JsonPrimitive
+        ?: throw TemplateFileException("字段 $key 必须是整数")
+    if (primitive is JsonNull) throw TemplateFileException("字段 $key 必须是整数")
+    return primitive.longOrNull ?: throw TemplateFileException("字段 $key 必须是整数")
 }
 
 private fun JsonObject.requireDecimalText(key: String): String {

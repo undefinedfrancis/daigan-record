@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.daigan.record.core.time.TimeProvider
+import com.daigan.record.data.repository.AttachmentFileCleanup
 import com.daigan.record.data.repository.DefaultGameAccountRepository
 import com.daigan.record.data.repository.DefaultOwnerRepository
 import java.time.Instant
@@ -164,7 +165,14 @@ class MigrationV1ToV2Test {
                 ownerDao = database.ownerDao(),
                 accountDao = database.gameAccountDao(),
                 orderDao = database.orderDao(),
+                taskDao = database.taskDao(),
+                occurrenceDao = database.occurrenceDao(),
+                receiptDao = database.receiptDao(),
+                attachmentDao = database.attachmentDao(),
+                completionBatchDao = database.completionBatchDao(),
+                categoryDao = database.accountCategoryDao(),
                 timeProvider = clock,
+                attachmentCleanup = AttachmentFileCleanup { 0 },
             )
 
             // Sanity: the legacy fixture really is the ambiguous case (three rows, two

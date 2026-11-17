@@ -57,9 +57,12 @@ import com.daigan.record.data.model.LoginMethod
 import com.daigan.record.data.model.Money
 import com.daigan.record.data.model.OrderSummary
 import com.daigan.record.data.model.OwnerDetail
+import com.daigan.record.data.repository.AccountDeletionImpact
+import com.daigan.record.ui.components.DisclosureHeader
 import com.daigan.record.ui.components.EmptyStateCard
 import com.daigan.record.ui.components.LabeledValue
 import com.daigan.record.ui.components.PageHeader
+import com.daigan.record.ui.components.SectionHeader
 import com.daigan.record.ui.components.StatusTag
 import java.time.Instant
 import java.time.ZoneId
@@ -78,6 +81,8 @@ fun OwnerDetailScreen(
     viewModel: OwnerDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val deletePendingAccountId by viewModel.deletePendingAccountId.collectAsStateWithLifecycle()
+    val deleteImpact by viewModel.deleteImpact.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -140,6 +145,11 @@ fun OwnerDetailScreen(
                 onRestoreOwner = viewModel::restoreOwner,
                 onArchiveAccount = viewModel::archiveAccount,
                 onRestoreAccount = viewModel::restoreAccount,
+                onDeleteAccount = viewModel::deleteAccount,
+                onRequestDeleteAccount = viewModel::requestDeleteAccount,
+                deletePendingAccountId = deletePendingAccountId,
+                deleteImpact = deleteImpact,
+                onDismissDeleteAccount = viewModel::dismissDeleteAccount,
                 onCreateOrder = onCreateOrder,
                 onOpenOrder = onOpenOrder,
                 modifier = Modifier.padding(padding),
@@ -160,14 +170,31 @@ internal fun OwnerDetailContent(
     onRestoreOwner: () -> Unit,
     onArchiveAccount: (String) -> Unit,
     onRestoreAccount: (String) -> Unit,
+    onDeleteAccount: (String) -> Unit,
     modifier: Modifier = Modifier,
     ordersByAccount: Map<String, List<OrderSummary>> = emptyMap(),
     onCreateOrder: (String) -> Unit = {},
     onOpenOrder: (String) -> Unit = {},
+    /** Set while a delete confirmation is open; the impact is loaded before it shows. */
+    onRequestDeleteAccount: (String) -> Unit = {},
+    deletePendingAccountId: String? = null,
+    deleteImpact: AccountDeletionImpact? = null,
+    onDismissDeleteAccount: () -> Unit = {},
 ) {
     var showArchiveOwnerDialog by rememberSaveable { mutableStateOf(false) }
     var archivedAccountsExpanded by rememberSaveable(detail.owner.id) { mutableStateOf(false) }
     val archived = detail.owner.archived
+    // Section-level action, passed as a slot so the header keeps one consistent layout.
+    val addAccountAction: (@Composable () -> Unit)? = if (archived) {
+        null
+    } else {
+        {
+            TextButton(onClick = onAddAccount) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+                Text(text = "新增账号", modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+    }
 
     if (showArchiveOwnerDialog) {
         AlertDialog(
@@ -250,19 +277,10 @@ internal fun OwnerDetailContent(
             }
 
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(text = "游戏账号", style = MaterialTheme.typography.titleMedium)
-                    Box(modifier = Modifier.weight(1f))
-                    if (!archived) {
-                        TextButton(onClick = onAddAccount) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
-                            Text(text = "新增账号", modifier = Modifier.padding(start = 4.dp))
-                        }
-                    }
-                }
+                SectionHeader(
+                    text = "游戏账号",
+                    trailing = if (archived) null else addAccountAction,
+                )
             }
 
             if (detail.activeAccounts.isEmpty()) {
@@ -286,6 +304,7 @@ internal fun OwnerDetailContent(
                     onEdit = { onEditAccount(account.ownerId, account.id) },
                     onArchive = { onArchiveAccount(account.id) },
                     onRestore = { onRestoreAccount(account.id) },
+                    onDelete = { onRequestDeleteAccount(account.id) },
                     onCopy = onCopy,
                     onCreateOrder = { onCreateOrder(account.id) },
                     onOpenOrder = onOpenOrder,
@@ -295,26 +314,16 @@ internal fun OwnerDetailContent(
             if (detail.archivedAccounts.isNotEmpty()) {
                 item {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { archivedAccountsExpanded = !archivedAccountsExpanded }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    DisclosureHeader(
+                        expanded = archivedAccountsExpanded,
+                        onToggle = { archivedAccountsExpanded = !archivedAccountsExpanded },
+                        tag = "owner-archived-accounts-header",
                     ) {
                         Text(
                             text = "已归档账号 · ${detail.archivedAccounts.size} 个",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
-                        )
-                        Icon(
-                            imageVector = if (archivedAccountsExpanded) {
-                                Icons.Filled.ExpandLess
-                            } else {
-                                Icons.Filled.ExpandMore
-                            },
-                            contentDescription = if (archivedAccountsExpanded) "收起已归档账号" else "展开已归档账号",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -327,6 +336,7 @@ internal fun OwnerDetailContent(
                             onEdit = {},
                             onArchive = {},
                             onRestore = { onRestoreAccount(account.id) },
+                            onDelete = { onRequestDeleteAccount(account.id) },
                             onCopy = onCopy,
                             onCreateOrder = {},
                             onOpenOrder = onOpenOrder,
@@ -335,6 +345,58 @@ internal fun OwnerDetailContent(
                 }
             }
         }
+    }
+
+    val pendingDeleteId = deletePendingAccountId
+    if (pendingDeleteId != null) {
+        val impact = deleteImpact
+        AlertDialog(
+            onDismissRequest = onDismissDeleteAccount,
+            title = { Text("永久删除游戏账号？") },
+            text = {
+                Column {
+                    if (impact == null) {
+                        Text("正在统计该账号的关联数据…")
+                    } else {
+                        Text(
+                            "账号：${impact.gameName} · ${impact.server} · ${impact.uid}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "将同步删除 ${impact.orderCount} 个订单（进行中 ${impact.activeOrderCount} 个）、" +
+                                "${impact.periodCount} 个托管期次、${impact.occurrenceCount} 条打卡/进度记录、" +
+                                "${impact.attachmentCount} 张截图。",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        Text(
+                            "有效收款 ${impact.receiptCount} 笔，合计 ${Money.formatCents(impact.receiptSumCents)}；" +
+                                "删除后这些收入将从统计中移除，尚未收取的 ${Money.formatCents(impact.outstandingCents)} 也会一并消失。",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        Text(
+                            "其他账号与订单不受影响。此操作不可撤销。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = impact != null,
+                    onClick = {
+                        onDismissDeleteAccount()
+                        onDeleteAccount(pendingDeleteId)
+                    },
+                ) { Text("确认删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissDeleteAccount) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -347,12 +409,14 @@ private fun AccountCard(
     onEdit: () -> Unit,
     onArchive: () -> Unit,
     onRestore: () -> Unit,
+    onDelete: () -> Unit,
     onCopy: (String) -> Unit,
     onCreateOrder: () -> Unit,
     onOpenOrder: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by rememberSaveable(account.id) { mutableStateOf(false) }
+    var showArchivedOrders by rememberSaveable(account.id) { mutableStateOf(false) }
     var passwordVisible by rememberSaveable(account.id) { mutableStateOf(false) }
     var showArchiveDialog by rememberSaveable(account.id) { mutableStateOf(false) }
 
@@ -394,6 +458,10 @@ private fun AccountCard(
                     modifier = Modifier.weight(1f),
                 )
                 StatusTag(text = account.server)
+                if (!ownerArchived) {
+                    // The confirmation lives at content level and shows real counts.
+                    TextButton(onClick = onDelete) { Text("删除") }
+                }
             }
 
             LabeledValue(
@@ -445,6 +513,13 @@ private fun AccountCard(
                     LabeledValue(
                         label = "登录设备",
                         value = device,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                account.resourceNotes?.takeIf { it.isNotBlank() }?.let { resources ->
+                    LabeledValue(
+                        label = "游戏资源与详情",
+                        value = com.daigan.record.data.model.AccountResources.decode(resources).displayText(),
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -540,13 +615,26 @@ private fun AccountCard(
             }
 
             if (orders.isNotEmpty()) {
+                val visibleOrders = orders.filter { !it.order.archived }
+                val archivedOrders = orders.filter { it.order.archived }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Text(
-                    text = "订单 · ${orders.size}",
+                    text = "订单 · ${visibleOrders.size}",
                     style = MaterialTheme.typography.labelLarge,
                 )
-                orders.forEach { summary ->
+                visibleOrders.forEach { summary ->
                     AccountOrderRow(summary = summary, onClick = { onOpenOrder(summary.order.id) })
+                }
+                if (archivedOrders.isNotEmpty()) {
+                    TextButton(onClick = { showArchivedOrders = !showArchivedOrders }) {
+                        Text(if (showArchivedOrders) "收起已归档订单 · ${archivedOrders.size}" else "查看已归档订单 · ${archivedOrders.size}")
+                    }
+                    if (showArchivedOrders) {
+                        Text("正常结束的订单，欠款与实收保留。打开可继续收款或恢复订单。", style = MaterialTheme.typography.bodySmall)
+                        archivedOrders.forEach { summary ->
+                            AccountOrderRow(summary = summary, onClick = { onOpenOrder(summary.order.id) })
+                        }
+                    }
                 }
             } else if (!ownerArchived && !account.archived) {
                 Text(
@@ -592,6 +680,7 @@ private fun AccountOrderRow(summary: OrderSummary, onClick: () -> Unit) {
         StatusTag(
             text = when {
                 summary.order.cancelled -> "已作废"
+                summary.order.archived -> "已归档"
                 !summary.order.isHosting && summary.order.completed -> "已完成"
                 !summary.order.isHosting -> "进行中"
                 else -> "托管"

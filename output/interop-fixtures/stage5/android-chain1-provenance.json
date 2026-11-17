@@ -1,0 +1,83 @@
+{
+    "generatedBy": "com.daigan.record.backup.Stage5ExchangeTest#a1ExportChain1SenderFixtures",
+    "description": "Android production export of a synthetic dataset built through repository commands",
+    "appVersionName": "1.8.4",
+    "appVersionCode": 13,
+    "roomSchema": 15,
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "device": "Google sdk_gphone64_arm64",
+    "apiLevel": 36,
+    "hardware": "emulator",
+    "watermark": "emulator-not-physical-device",
+    "generatedAt": "2026-03-10T02:00:00Z",
+    "syntheticDataOnly": true,
+    "attachmentKind": "real-jpeg-produced-on-device",
+    "extra": {
+        "attachmentSha256": "8e5902057ac952df0833fe6f13a75d9a5ea8685065fae556a84f9cfa60213c66",
+        "attachmentBytes": 20301,
+        "attachmentRelativePath": "9ede8759-c7b1-4482-805f-4800c3966afd.jpg",
+        "attachmentOwnsTask": "202e8fd8-0eed-465b-9cc2-3d98375d5fe8",
+        "countOrderId": "84d62d49-bf98-40a3-b25d-ef58bd19b7e1",
+        "cumulativeTaskId": "5c1463e2-152b-4790-9865-6839d37afbb3",
+        "firstRoundId": "34ef41b8-5268-45f1-85b3-180e43b64172",
+        "retiredTaskId": "e45987e0-7f01-4a4e-87b2-8200dbd0ee66",
+        "scenarioIds": "S-27,S-30,S-33,S-36,S-38,S-42,S-50,S-57,S-58"
+    },
+    "files": [
+        {
+            "file": "android-chain1-plain.dgbk",
+            "sha256": "9a458505bf766eb83ee1083423b7b33ceee07339b366d393b2007ffc596844ab",
+            "sizeBytes": 21942,
+            "encrypted": false
+        },
+        {
+            "file": "android-chain1-encrypted.dgbk",
+            "sha256": "7ea89618a0072478a2fd4d33d71467401fa50fc70aa08a8131c0c81285574790",
+            "sizeBytes": 22002,
+            "encrypted": true,
+            "syntheticPassword": "stage5-互通-Ω-口令"
+        },
+        {
+            "file": "android-chain1-template-v4.json",
+            "sha256": "90b8d70ec65f94fc281952c72361354e380d1f00f70852e9d50e4466dadd3f98",
+            "sizeBytes": 2388
+        },
+        {
+            "file": "android-chain1-canonical.json",
+            "sha256": "76cd90a898cf0eb1a6ba955fe5770551e861af4f7cbe49a0db4e5feff20f6aef",
+            "sizeBytes": 37381
+        }
+    ],
+    "rowCounts": {
+        "owners": 2,
+        "owner_number_sequence": 1,
+        "account_categories": 2,
+        "game_accounts": 2,
+        "game_server_options": 0,
+        "game_templates": 1,
+        "template_categories": 1,
+        "template_tasks": 2,
+        "template_price_presets": 0,
+        "template_seed_state": 0,
+        "completion_batches": 2,
+        "orders": 3,
+        "hosting_periods": 3,
+        "hosting_sessions": 3,
+        "order_price_changes": 0,
+        "task_definitions": 9,
+        "task_occurrences": 7,
+        "task_progress_events": 6,
+        "completion_batch_items": 2,
+        "attachments": 1,
+        "receipts": 4,
+        "receipt_corrections": 1,
+        "order_creation_operations": 3,
+        "reminder_settings": 0
+    },
+    "limitations": [
+        "Emulator only: no physical device participated.",
+        "Synthetic data; no real user records or secrets.",
+        "exportedAt / ZIP timestamps change per run, so archive hashes differ between runs."
+    ]
+}

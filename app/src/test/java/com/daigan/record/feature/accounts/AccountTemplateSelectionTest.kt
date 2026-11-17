@@ -9,6 +9,7 @@ import com.daigan.record.testing.MainDispatcherRule
 import com.daigan.record.testing.TemplateFixtures
 import com.daigan.record.testing.account
 import com.daigan.record.testing.owner
+import com.daigan.record.testing.InMemoryUiPreferenceStore
 import com.daigan.record.ui.navigation.Routes
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
@@ -41,6 +42,8 @@ class AccountTemplateSelectionTest {
             accountRepository = accounts,
             templateRepository = templates,
             serverOptionRepository = com.daigan.record.testing.FakeServerOptionRepository(),
+            categoryRepository = com.daigan.record.testing.FakeAccountCategoryRepository(),
+            uiPreferenceStore = InMemoryUiPreferenceStore(),
         )
         runCurrent()
         return viewModel

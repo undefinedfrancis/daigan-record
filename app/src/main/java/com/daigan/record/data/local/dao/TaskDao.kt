@@ -4,6 +4,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.daigan.record.data.local.entity.TaskDefinitionEntity
+import com.daigan.record.data.model.ProgressType
+import com.daigan.record.data.model.RecurrenceType
 import java.math.BigDecimal
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
@@ -20,7 +22,7 @@ interface TaskDao {
         INNER JOIN orders o ON o.id = t.orderId
         INNER JOIN game_accounts a ON a.id = o.accountId
         INNER JOIN owners w ON w.id = a.ownerId
-        WHERE o.type = 'HOSTING' AND a.archivedAt IS NULL AND w.archivedAt IS NULL
+        WHERE t.retiredAt IS NULL AND o.type = 'HOSTING' AND a.archivedAt IS NULL AND w.archivedAt IS NULL
         ORDER BY t.sortOrder ASC, t.id ASC
         """
     )
@@ -32,7 +34,7 @@ interface TaskDao {
         INNER JOIN orders o ON o.id = t.orderId
         INNER JOIN game_accounts a ON a.id = o.accountId
         INNER JOIN owners w ON w.id = a.ownerId
-        WHERE o.type = 'SHORT_TASK' AND o.completedAt IS NULL
+        WHERE t.retiredAt IS NULL AND o.type = 'SHORT_TASK' AND o.completedAt IS NULL
           AND a.archivedAt IS NULL AND w.archivedAt IS NULL
         ORDER BY t.sortOrder ASC, t.id ASC
         """
@@ -61,6 +63,12 @@ interface TaskDao {
 
     @Query("SELECT * FROM task_definitions WHERE id IN (:ids)")
     suspend fun findByIds(ids: List<String>): List<TaskDefinitionEntity>
+
+    @Query("UPDATE task_definitions SET retiredAt = :now, updatedAt = :now WHERE id = :taskId")
+    suspend fun retire(taskId: String, now: Instant)
+
+    @androidx.room.Update
+    suspend fun updateTask(task: TaskDefinitionEntity)
 
     @Insert
     suspend fun insert(task: TaskDefinitionEntity)
@@ -101,4 +109,7 @@ interface TaskDao {
         completedAt: Instant?,
         updatedAt: Instant,
     )
+
+    @Query("UPDATE task_definitions SET title = :title, progressType = :progressType, startValue = :startValue, targetValue = :targetValue, unit = :unit, recurrence = :recurrence, weekdays = :weekdays, everyNDays = :everyNDays, monthDay = :monthDay, sortOrder = :sortOrder, updatedAt = :updatedAt WHERE id = :taskId")
+    suspend fun updateDefinition(taskId: String, title: String, progressType: ProgressType, startValue: BigDecimal, targetValue: BigDecimal, unit: String?, recurrence: RecurrenceType, weekdays: String?, everyNDays: Int?, monthDay: Int?, sortOrder: Int, updatedAt: Instant)
 }

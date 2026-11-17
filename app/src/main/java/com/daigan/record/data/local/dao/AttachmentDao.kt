@@ -50,6 +50,15 @@ interface AttachmentDao {
     @Query("DELETE FROM attachments WHERE id = :attachmentId")
     suspend fun deleteById(attachmentId: String)
 
+    /** Cascade delete for order/account deletion: removes every row of the order. */
+    @Query(
+        "DELETE FROM attachments WHERE taskDefinitionId IN " +
+            "(SELECT id FROM task_definitions WHERE orderId = :orderId) " +
+            "OR occurrenceId IN (SELECT occ.id FROM task_occurrences occ " +
+            "INNER JOIN task_definitions t ON t.id = occ.taskDefinitionId WHERE t.orderId = :orderId)",
+    )
+    suspend fun deleteForOrder(orderId: String)
+
     @Query("SELECT COUNT(*) FROM attachments WHERE occurrenceId = :occurrenceId")
     suspend fun countForOccurrence(occurrenceId: String): Int
 }

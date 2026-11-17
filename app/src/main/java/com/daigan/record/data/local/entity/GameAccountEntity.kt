@@ -31,6 +31,7 @@ import java.time.Instant
     indices = [
         Index(value = ["ownerId"]),
         Index(value = ["ownerId", "archivedAt"]),
+        Index(value = ["categoryId"], name = "index_game_accounts_categoryId"),
     ],
 )
 data class GameAccountEntity(
@@ -62,6 +63,13 @@ data class GameAccountEntity(
     val defaultTemplateId: String? = null,
     /** Optional free-text login device (手机/平板/电脑/自定义); null on legacy accounts. */
     val loginDevice: String? = null,
+    val resourceNotes: String? = null,
+    /**
+     * 账号分类（UF-037，schema 15）。NULL = 未分类。
+     *
+     * 逻辑外键，没有 SQL FK：删除分类的路径在同一事务里把账号置为未分类，而不是级联删除。
+     */
+    val categoryId: String? = null,
 ) {
     fun toModel(): GameAccount = GameAccount(
         id = id,
@@ -77,5 +85,7 @@ data class GameAccountEntity(
         archivedWithOwner = archiveBatchId != null,
         defaultTemplateId = defaultTemplateId,
         loginDevice = loginDevice,
+        resourceNotes = resourceNotes,
+        categoryId = categoryId,
     )
 }

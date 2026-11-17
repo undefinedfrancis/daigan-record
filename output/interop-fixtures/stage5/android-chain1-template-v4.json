@@ -1,0 +1,63 @@
+{
+    "format": "daigan-template",
+    "formatVersion": 4,
+    "template": {
+        "id": "9ae6c139-2c65-4570-aaa8-e270fe0fba96",
+        "gameName": "游戏X",
+        "templateVersion": "2026.10",
+        "gameVersionNotes": null,
+        "timeZone": "Asia/Shanghai",
+        "dailyRefresh": "04:00",
+        "weeklyRefreshDay": "MONDAY",
+        "weeklyRefreshTime": "05:00",
+        "hostingMode": "COUNT_BASED",
+        "targetSessions": 2,
+        "serviceWeekdays": null,
+        "defaultOrderTitle": "每日托管",
+        "categories": [
+            {
+                "id": "69b82dba-07dd-49e8-a8c1-4740f873983b",
+                "name": "主号",
+                "hostingMode": "COUNT_BASED",
+                "targetSessions": 2,
+                "serviceWeekdays": null,
+                "tasks": [
+                    {
+                        "id": "ab550e3a-4ce6-454b-908b-1a53945b22dc",
+                        "categoryId": "69b82dba-07dd-49e8-a8c1-4740f873983b",
+                        "title": "签到",
+                        "progressType": "CHECKBOX",
+                        "startValue": "0",
+                        "targetValue": "1",
+                        "unit": null,
+                        "recurrence": "DAILY",
+                        "weekdays": [],
+                        "monthDay": null,
+                        "monthDays": [],
+                        "everyNDays": null,
+                        "activeFrom": null,
+                        "activeUntil": null,
+                        "numericMode": null
+                    },
+                    {
+                        "id": "60b13591-ea7b-4f07-a3b7-c35714eb3bff",
+                        "categoryId": "69b82dba-07dd-49e8-a8c1-4740f873983b",
+                        "title": "抽数",
+                        "progressType": "NUMERIC",
+                        "startValue": "0",
+                        "targetValue": "100",
+                        "unit": "抽",
+                        "recurrence": "DAILY",
+                        "weekdays": [],
+                        "monthDay": null,
+                        "monthDays": [],
+                        "everyNDays": null,
+                        "activeFrom": null,
+                        "activeUntil": null,
+                        "numericMode": "CUMULATIVE"
+                    }
+                ]
+            }
+        ]
+    }
+}

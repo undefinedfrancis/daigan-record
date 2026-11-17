@@ -1,0 +1,242 @@
+{
+  "description": "日历与发生槽的中立向量；时间均为 ISO-8601 UTC，日期为 yyyy-MM-dd。",
+  "rules": {
+    "zoneId": "Asia/Shanghai",
+    "dailyRefreshMinutes": 240,
+    "weeklyRefreshDay": 1,
+    "weeklyRefreshMinutes": 300
+  },
+  "gameDate": [
+    { "at": "2026-10-17T19:59:00Z", "expected": "2026-10-17" },
+    { "at": "2026-10-17T20:00:00Z", "expected": "2026-10-18" },
+    { "at": "2026-10-17T19:59:59Z", "expected": "2026-10-17" }
+  ],
+  "gameDateAbroad": {
+    "rules": {
+      "zoneId": "America/Los_Angeles",
+      "dailyRefreshMinutes": 300,
+      "weeklyRefreshDay": 1,
+      "weeklyRefreshMinutes": 300
+    },
+    "cases": [
+      { "at": "2026-10-17T11:59:00Z", "expected": "2026-10-16" },
+      { "at": "2026-10-17T12:00:00Z", "expected": "2026-10-17" }
+    ]
+  },
+  "gameDateDst": {
+    "rules": {
+      "zoneId": "America/New_York",
+      "dailyRefreshMinutes": 240,
+      "weeklyRefreshDay": 1,
+      "weeklyRefreshMinutes": 300
+    },
+    "cases": [
+      { "at": "2026-03-08T07:30:00Z", "expected": "2026-03-07" },
+      { "at": "2026-03-08T08:00:00Z", "expected": "2026-03-08" },
+      { "at": "2026-11-01T08:59:00Z", "expected": "2026-10-31" },
+      { "at": "2026-11-01T09:00:00Z", "expected": "2026-11-01" }
+    ]
+  },
+  "localToInstant": [
+    {
+      "name": "夏令时重叠取较早偏移",
+      "zoneId": "America/New_York",
+      "date": "2026-11-01",
+      "minutes": 90,
+      "expected": "2026-11-01T05:30:00Z"
+    },
+    {
+      "name": "夏令时间隙按 Java 语义前移",
+      "zoneId": "America/New_York",
+      "date": "2026-03-08",
+      "minutes": 150,
+      "expected": "2026-03-08T07:30:00Z"
+    }
+  ],
+  "weeklyWindow": [
+    {
+      "at": "2026-10-18T04:00:00Z",
+      "startDate": "2026-10-12",
+      "endDate": "2026-10-18",
+      "gameDateAtStart": "2026-10-12"
+    },
+    {
+      "at": "2026-10-18T20:30:00Z",
+      "startDate": "2026-10-12",
+      "endDate": "2026-10-18",
+      "gameDateAtStart": "2026-10-12"
+    },
+    {
+      "at": "2026-10-18T21:00:00Z",
+      "startDate": "2026-10-19",
+      "endDate": "2026-10-25",
+      "gameDateAtStart": "2026-10-19"
+    }
+  ],
+  "weeklyWindowForGameDate": [
+    { "date": "2026-10-20", "startDate": "2026-10-19", "endDate": "2026-10-25" }
+  ],
+  "weeklyWindowDst": {
+    "rules": {
+      "zoneId": "America/New_York",
+      "dailyRefreshMinutes": 240,
+      "weeklyRefreshDay": 1,
+      "weeklyRefreshMinutes": 300
+    },
+    "cases": [
+      {
+        "at": "2026-03-08T12:00:00Z",
+        "startDate": "2026-03-02",
+        "endDate": "2026-03-08",
+        "durationHours": 167
+      }
+    ]
+  },
+  "occurrences": [
+    {
+      "name": "每日任务按游戏日生成",
+      "recurrence": "DAILY",
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-19",
+      "expectedKey": "D:2026-10-19"
+    },
+    {
+      "name": "指定星期命中周一",
+      "recurrence": "SELECTED_WEEKDAYS",
+      "weekdays": [1, 3],
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-19",
+      "expectedKey": "S:2026-10-19"
+    },
+    {
+      "name": "指定星期跳过周二",
+      "recurrence": "SELECTED_WEEKDAYS",
+      "weekdays": [1, 3],
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-20",
+      "expectedKey": null
+    },
+    {
+      "name": "每隔 3 天以开始日为锚点",
+      "recurrence": "EVERY_N_DAYS",
+      "everyNDays": 3,
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-12",
+      "expectedKey": "E:2026-10-12"
+    },
+    {
+      "name": "每隔 3 天跳过次日",
+      "recurrence": "EVERY_N_DAYS",
+      "everyNDays": 3,
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-13",
+      "expectedKey": null
+    },
+    {
+      "name": "每隔 3 天命中第 4 天",
+      "recurrence": "EVERY_N_DAYS",
+      "everyNDays": 3,
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-15",
+      "expectedKey": "E:2026-10-15"
+    },
+    {
+      "name": "每周任务周一只生成一条",
+      "recurrence": "WEEKLY",
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-19",
+      "expectedKey": "W:2026-10-19"
+    },
+    {
+      "name": "每周任务同窗口键稳定",
+      "recurrence": "WEEKLY",
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-20",
+      "expectedKey": "W:2026-10-19"
+    },
+    {
+      "name": "周窗口裁剪到托管期但键不变",
+      "recurrence": "WEEKLY",
+      "periodStart": "2026-10-14",
+      "periodEnd": "2026-10-20",
+      "date": "2026-10-14",
+      "expectedKey": "W:2026-10-12",
+      "expectedAttributed": "2026-10-14",
+      "expectedWindowEnd": "2026-10-18"
+    },
+    {
+      "name": "托管期最后一天仍生成",
+      "recurrence": "DAILY",
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-25",
+      "expectedKey": "D:2026-10-25"
+    },
+    {
+      "name": "托管期外不生成",
+      "recurrence": "DAILY",
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-26",
+      "expectedKey": null
+    },
+    {
+      "name": "一次性任务没有发生槽",
+      "recurrence": "ONE_TIME",
+      "periodStart": "2026-10-12",
+      "periodEnd": "2026-10-25",
+      "date": "2026-10-19",
+      "expectedKey": null
+    },
+    {
+      "name": "每月 31 日命中 1 月 31",
+      "recurrence": "MONTHLY",
+      "monthDay": 31,
+      "periodStart": "2026-01-01",
+      "periodEnd": "2026-12-31",
+      "date": "2026-01-31",
+      "expectedKey": "M:2026-01-31"
+    },
+    {
+      "name": "每月 31 日跳过 2 月",
+      "recurrence": "MONTHLY",
+      "monthDay": 31,
+      "periodStart": "2026-01-01",
+      "periodEnd": "2026-12-31",
+      "date": "2026-02-28",
+      "expectedKey": null
+    },
+    {
+      "name": "每月 31 日跳过 4 月 30",
+      "recurrence": "MONTHLY",
+      "monthDay": 31,
+      "periodStart": "2026-01-01",
+      "periodEnd": "2026-12-31",
+      "date": "2026-04-30",
+      "expectedKey": null
+    },
+    {
+      "name": "每月日号超出 1–31 不生成",
+      "recurrence": "MONTHLY",
+      "monthDay": 32,
+      "periodStart": "2026-01-01",
+      "periodEnd": "2026-12-31",
+      "date": "2026-03-31",
+      "expectedKey": null
+    }
+  ],
+  "weeklyTwoWindows": {
+    "periodStart": "2026-10-12",
+    "periodEnd": "2026-10-25",
+    "date": "2026-10-19",
+    "expectedKeys": ["W:2026-10-12", "W:2026-10-19"]
+  }
+}

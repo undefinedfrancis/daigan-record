@@ -9,14 +9,17 @@ import com.daigan.record.data.local.dao.TemplateDao
 import com.daigan.record.data.local.entity.GameTemplateEntity
 import com.daigan.record.data.local.entity.ServerOptionEntity
 import com.daigan.record.data.local.entity.TemplateCategoryEntity
+import com.daigan.record.data.local.entity.TemplatePricePresetEntity
 import com.daigan.record.data.local.entity.TemplateSeedStateEntity
 import com.daigan.record.data.local.entity.TemplateTaskEntity
 import com.daigan.record.data.local.toModel
 import com.daigan.record.data.local.toSummary
 import com.daigan.record.data.model.GameTemplate
+import com.daigan.record.data.model.HostingMode
 import com.daigan.record.data.model.GameTemplateSummary
 import com.daigan.record.data.model.TemplateCategoryDraft
 import com.daigan.record.data.model.TemplateDraft
+import com.daigan.record.data.model.TemplateTitleRule
 import com.daigan.record.data.model.TemplateOrigin
 import com.daigan.record.data.model.TemplateTaskDraft
 import com.daigan.record.data.template.BuiltInTemplateSource
@@ -120,10 +123,12 @@ class DefaultGameTemplateRepository @Inject constructor(
         templateDao.observeTemplates(),
         templateDao.observeCategories(),
         templateDao.observeTasks(),
-    ) { templates, categories, tasks ->
+        templateDao.observePricePresets(),
+    ) { templates, categories, tasks, presets ->
         templates.firstOrNull { it.id == templateId }?.toModel(
             categories = categories.filter { it.templateId == templateId },
             tasks = tasks.filter { it.templateId == templateId },
+            pricePresets = presets.filter { it.templateId == templateId },
         )
     }
 
@@ -133,6 +138,7 @@ class DefaultGameTemplateRepository @Inject constructor(
             template.toModel(
                 categories = templateDao.findCategories(templateId),
                 tasks = templateDao.findTasks(templateId),
+                pricePresets = templateDao.findPricePresets(templateId),
             )
         }
 
@@ -171,6 +177,7 @@ class DefaultGameTemplateRepository @Inject constructor(
                 templateDao.findTemplatesByBuiltInKeys(removedKeys).forEach { legacy ->
                     if (legacy.origin == TemplateOrigin.BUILT_IN) {
                         templateDao.clearAccountDefault(legacy.id)
+                        templateDao.deletePricePresets(legacy.id)
                         templateDao.deleteTasks(legacy.id)
                         templateDao.deleteCategories(legacy.id)
                         templateDao.deleteTemplate(legacy.id)
@@ -249,6 +256,7 @@ class DefaultGameTemplateRepository @Inject constructor(
         database.withDatasetTransaction {
             val template = templateDao.findTemplate(templateId) ?: return@withDatasetTransaction
             templateDao.clearAccountDefault(templateId)
+            templateDao.deletePricePresets(templateId)
             templateDao.deleteTasks(templateId)
             templateDao.deleteCategories(templateId)
             templateDao.deleteTemplate(template.id)
@@ -334,12 +342,15 @@ class DefaultGameTemplateRepository @Inject constructor(
     ): String {
         val usedCategoryIds = templateDao.allCategoryIds().toMutableSet()
         val usedTaskIds = templateDao.allTaskIds().toMutableSet()
+        val usedPresetIds = templateDao.allPricePresetIds().toMutableSet()
         val id = if (templateDao.findTemplate(templateId) == null) {
             templateId
         } else {
             UUID.randomUUID().toString()
         }
         val (categories, tasks) = allocateChildren(id, draft, usedCategoryIds, usedTaskIds)
+        val pricePresets = allocatePricePresets(id, draft, usedPresetIds)
+        val defaults = templateDefaults(draft, categories)
         templateDao.insertTemplate(
             GameTemplateEntity(
                 id = id,
@@ -356,10 +367,18 @@ class DefaultGameTemplateRepository @Inject constructor(
                 sortOrder = sortOrder,
                 createdAt = now,
                 updatedAt = now,
+                // NULL means "inherit the category consensus" (schema 15). An explicit
+                // DATE_RANGE is therefore persisted as DATE_RANGE, never collapsed to null.
+                hostingMode = defaults.mode,
+                targetSessions = defaults.target,
+                serviceWeekdays = defaults.weekdays,
+                defaultOrderTitle = TemplateTitleRule
+                    .normalizeDefaultOrderTitle(draft.defaultOrderTitle),
             ),
         )
         templateDao.insertCategories(categories)
         if (tasks.isNotEmpty()) templateDao.insertTasks(tasks)
+        if (pricePresets.isNotEmpty()) templateDao.insertPricePresets(pricePresets)
         return id
     }
 
@@ -377,17 +396,22 @@ class DefaultGameTemplateRepository @Inject constructor(
     ) {
         val oldCategoryIds = templateDao.findCategories(existing.id).map { it.id }.toSet()
         val oldTaskIds = templateDao.findTasks(existing.id).map { it.id }.toSet()
+        val oldPresetIds = templateDao.findPricePresets(existing.id).map { it.id }.toSet()
+        templateDao.deletePricePresets(existing.id)
         templateDao.deleteTasks(existing.id)
         templateDao.deleteCategories(existing.id)
 
         val usedCategoryIds = (templateDao.allCategoryIds() - oldCategoryIds).toMutableSet()
         val usedTaskIds = (templateDao.allTaskIds() - oldTaskIds).toMutableSet()
+        val usedPresetIds = (templateDao.allPricePresetIds() - oldPresetIds).toMutableSet()
         val (categories, tasks) = allocateChildren(
             existing.id,
             draft,
             usedCategoryIds,
             usedTaskIds,
         )
+        val pricePresets = allocatePricePresets(existing.id, draft, usedPresetIds)
+        val defaults = templateDefaults(draft, categories)
 
         templateDao.updateTemplate(
             existing.copy(
@@ -402,10 +426,37 @@ class DefaultGameTemplateRepository @Inject constructor(
                 origin = origin,
                 builtInKey = builtInKey,
                 updatedAt = now,
+                hostingMode = defaults.mode,
+                targetSessions = defaults.target,
+                serviceWeekdays = defaults.weekdays,
+                defaultOrderTitle = TemplateTitleRule
+                    .normalizeDefaultOrderTitle(draft.defaultOrderTitle),
             ),
         )
         templateDao.insertCategories(categories)
         if (tasks.isNotEmpty()) templateDao.insertTasks(tasks)
+        if (pricePresets.isNotEmpty()) templateDao.insertPricePresets(pricePresets)
+    }
+
+    /**
+     * Builds the preset rows of one template. Amounts are already validated integer
+     * cents; an unparsable draft value is a programming error, not a user input, so it
+     * fails loudly rather than silently storing a different price.
+     */
+    private fun allocatePricePresets(
+        templateId: String,
+        draft: TemplateDraft,
+        usedIds: MutableSet<String>,
+    ): List<TemplatePricePresetEntity> = draft.pricePresets.mapIndexed { index, preset ->
+        TemplatePricePresetEntity(
+            id = allocateId(preset.id, usedIds),
+            templateId = templateId,
+            amountCents = checkNotNull(preset.amountCentsOrNull()) {
+                "价格预设「${preset.amountText}」不是有效金额"
+            },
+            label = preset.label.ifBlank { null },
+            sortOrder = index,
+        )
     }
 
     private fun allocateChildren(
@@ -418,11 +469,28 @@ class DefaultGameTemplateRepository @Inject constructor(
         val tasks = mutableListOf<TemplateTaskEntity>()
         draft.categories.forEachIndexed { categoryIndex, category ->
             val categoryId = allocateId(category.id, usedCategoryIds)
+            // 分类级建单默认值（schema 15）：null = 继承模板，DATE_RANGE 是显式按日期。
+            // Inheritance is preserved: a category with no explicit mode is never rewritten
+            // to the template's mode, otherwise every category would look explicit.
+            val categoryMode = category.hostingMode
+            val categoryTarget = if (categoryMode == HostingMode.COUNT_BASED) {
+                category.targetSessionsText.trim().toIntOrNull()
+            } else {
+                null
+            }
+            val categoryWeekdays = if (categoryMode == HostingMode.DATE_RANGE) {
+                category.serviceWeekdays.ifBlank { null }
+            } else {
+                null
+            }
             categories += TemplateCategoryEntity(
                 id = categoryId,
                 templateId = templateId,
                 name = category.name,
                 sortOrder = categoryIndex,
+                hostingMode = categoryMode,
+                targetSessions = categoryTarget,
+                serviceWeekdays = categoryWeekdays,
             )
             category.tasks.forEachIndexed { taskIndex, task ->
                 tasks += TemplateTaskEntity(
@@ -437,16 +505,70 @@ class DefaultGameTemplateRepository @Inject constructor(
                     recurrence = task.recurrence,
                     weekdays = encodeWeekdays(task.weekdays),
                     monthDay = if (task.recurrence == com.daigan.record.data.model.RecurrenceType.MONTHLY) task.monthDayOrNull() else null,
+                    monthDays = if (task.recurrence == com.daigan.record.data.model.RecurrenceType.MONTHLY) com.daigan.record.data.model.encodeMonthlyDates(task.monthDaysOrNull().orEmpty()) else null,
                     everyNDays = if (task.recurrence == com.daigan.record.data.model.RecurrenceType.EVERY_N_DAYS) {
                         task.everyNOrNull()
                     } else {
                         null
                     },
                     sortOrder = taskIndex,
+                    activeFrom = task.activeFrom.ifBlank { null },
+                    activeUntil = task.activeUntil.ifBlank { null },
+                    numericMode = task.numericMode,
                 )
             }
         }
         return categories to tasks
+    }
+
+    private data class TemplateDefaults(
+        val mode: HostingMode?,
+        val target: Int?,
+        val weekdays: String?,
+    )
+
+    /**
+     * Template-level mirror of the category defaults (schema 15).
+     *
+     * An explicit mode on the draft is written verbatim. Without one the template stores
+     * the category consensus: values only when every declared category agrees, otherwise
+     * NULL (three independent columns, each NULL on disagreement). This is the same rule
+     * the web editor applies, so both platforms write the same meaning.
+     */
+    private fun templateDefaults(
+        draft: TemplateDraft,
+        categories: List<TemplateCategoryEntity>,
+    ): TemplateDefaults {
+        if (draft.hostingModeExplicit) {
+            return when (draft.hostingMode) {
+                HostingMode.COUNT_BASED -> TemplateDefaults(
+                    mode = HostingMode.COUNT_BASED,
+                    target = draft.targetSessionsOrNull(),
+                    weekdays = null,
+                )
+
+                HostingMode.DATE_RANGE -> TemplateDefaults(
+                    mode = HostingMode.DATE_RANGE,
+                    target = null,
+                    weekdays = draft.serviceWeekdays.ifBlank { null },
+                )
+            }
+        }
+        val declared = categories.mapNotNull { category ->
+            category.hostingMode?.let { mode ->
+                Triple(mode, category.targetSessions, category.serviceWeekdays)
+            }
+        }
+        if (declared.isEmpty()) return TemplateDefaults(null, null, null)
+        val first = declared.first()
+        val agreement = declared.all {
+            it.first == first.first && it.second == first.second && it.third == first.third
+        }
+        return if (agreement) {
+            TemplateDefaults(first.first, first.second, first.third)
+        } else {
+            TemplateDefaults(null, null, null)
+        }
     }
 
     private fun allocateId(candidate: String, used: MutableSet<String>): String {

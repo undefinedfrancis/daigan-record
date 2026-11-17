@@ -6,10 +6,13 @@ import com.daigan.record.core.time.ReportingTimeZoneProvider
 import com.daigan.record.core.time.SystemReportingTimeZoneProvider
 import com.daigan.record.core.time.SystemTimeProvider
 import com.daigan.record.core.time.TimeProvider
+import com.daigan.record.data.repository.AttachmentFileCleanup
 import com.daigan.record.data.repository.AttachmentRepository
 import com.daigan.record.data.repository.DefaultAttachmentRepository
 import com.daigan.record.data.repository.DefaultGameAccountRepository
 import com.daigan.record.data.repository.DefaultGameTemplateRepository
+import com.daigan.record.data.repository.AccountCategoryRepository
+import com.daigan.record.data.repository.DefaultAccountCategoryRepository
 import com.daigan.record.data.repository.DefaultOrderRepository
 import com.daigan.record.data.repository.DefaultOwnerRepository
 import com.daigan.record.data.repository.DefaultReceiptRepository
@@ -54,15 +57,33 @@ interface DataModule {
 
     @Singleton
     @Binds
+    fun bindsAccountCategoryRepository(
+        repository: DefaultAccountCategoryRepository,
+    ): AccountCategoryRepository
+
+    @Singleton
+    @Binds
     fun bindsServerOptionRepository(repository: DefaultServerOptionRepository): ServerOptionRepository
 
     @Singleton
     @Binds
     fun bindsOrderRepository(repository: DefaultOrderRepository): OrderRepository
 
+    /** One count-session write/recompute boundary shared by every order/progress command. */
+    @Singleton
+    @Binds
+    fun bindsCountSessionService(
+        service: com.daigan.record.data.repository.DefaultCountSessionService,
+    ): com.daigan.record.data.repository.CountSessionService
+
     @Singleton
     @Binds
     fun bindsAttachmentRepository(repository: DefaultAttachmentRepository): AttachmentRepository
+
+    /** Same singleton serves the post-commit file cleanup used by deletions. */
+    @Singleton
+    @Binds
+    fun bindsAttachmentFileCleanup(repository: DefaultAttachmentRepository): AttachmentFileCleanup
 
     @Singleton
     @Binds
@@ -74,6 +95,12 @@ interface DataModule {
 
     @Binds
     fun bindsTimeProvider(timeProvider: SystemTimeProvider): TimeProvider
+
+    @Singleton
+    @Binds
+    fun bindsProgressCommandService(
+        repository: com.daigan.record.data.repository.CumulativeProgressRepository,
+    ): com.daigan.record.data.repository.ProgressCommandService
 
     @Binds
     fun bindsReportingTimeZoneProvider(

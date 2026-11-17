@@ -4,6 +4,8 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.daigan.record.data.model.HostingMode
+import com.daigan.record.data.model.NumericMode
 import com.daigan.record.data.model.ProgressType
 import com.daigan.record.data.model.RecurrenceType
 import com.daigan.record.data.model.TemplateOrigin
@@ -47,6 +49,17 @@ data class GameTemplateEntity(
     val sortOrder: Int,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /**
+     * Hosting mode proposed for new orders (UF-034). NULL = date-based, including every
+     * template written before schema 13; a template edit never rewrites an order.
+     */
+    val hostingMode: HostingMode? = null,
+    /** Proposed check-in round count; NULL unless [hostingMode] is count-based. */
+    val targetSessions: Int? = null,
+    /** 服务星期集合（逗号分隔 ISO 1–7，schema 15）；配合 DATE_RANGE 表示"仅工作日"。 */
+    val serviceWeekdays: String? = null,
+    /** 建单默认标题（UF-036，schema 15）；NULL = 不预填。 */
+    val defaultOrderTitle: String? = null,
 )
 
 @Entity(
@@ -67,6 +80,15 @@ data class TemplateCategoryEntity(
     val templateId: String,
     val name: String,
     val sortOrder: Int,
+    /**
+     * 分类级托管方式（schema 15）。NULL = **继承模板**；DATE_RANGE 是显式按日期。
+     *
+     * 历史网页分类的 null 来自保存路径把 'dates' 归一，因此迁移时被解释为显式
+     * DATE_RANGE，绝不当成继承（见 `category-service-defaults`）。
+     */
+    val hostingMode: HostingMode? = null,
+    val targetSessions: Int? = null,
+    val serviceWeekdays: String? = null,
 )
 
 /**
@@ -111,6 +133,41 @@ data class TemplateTaskEntity(
     val everyNDays: Int?,
     val sortOrder: Int,
     val monthDay: Int? = null,
+    val monthDays: String? = null,
+    /** 任务生效起止日期（schema 15），建单时作为默认值。 */
+    val activeFrom: String? = null,
+    val activeUntil: String? = null,
+    /** 数值口径默认值（schema 15）；NULL 读作 PER_OCCURRENCE。 */
+    val numericMode: NumericMode? = null,
+)
+
+/**
+ * One price option a template offers when an order is created from it.
+ *
+ * Like categories and tasks, presets are **creation defaults**: an order copies the
+ * chosen amount into `orders.priceCents` and never references this row. A preset is
+ * therefore free to be edited or deleted at any time without touching a stored order.
+ */
+@Entity(
+    tableName = "template_price_presets",
+    foreignKeys = [
+        ForeignKey(
+            entity = GameTemplateEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["templateId"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["templateId"], name = "index_template_price_presets_templateId")],
+)
+data class TemplatePricePresetEntity(
+    @PrimaryKey val id: String,
+    val templateId: String,
+    /** Integer cents, so a stored amount can never drift by a rounding step. */
+    val amountCents: Long,
+    val label: String?,
+    val sortOrder: Int,
 )
 
 /**

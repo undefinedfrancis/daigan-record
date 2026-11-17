@@ -1,9 +1,10 @@
 package com.daigan.record.core.time
 
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.DayOfWeek
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
@@ -25,16 +26,24 @@ import java.time.temporal.TemporalAdjusters
  *
  * The rules are user-configured provisional values in Phase 2. Verified game templates
  * arrive in Phase 4; nothing here claims an official rule for a named game.
+ *
+ * [monthlyRefreshDays] is the shared schema-15 field. When it is non-empty, **weekly-style
+ * work** (recurrence WEEKLY) uses refresh-to-refresh windows anchored on those monthly
+ * days instead of seven-day windows. A day number that does not exist in a month is
+ * skipped, never clamped to the month's last day. Fixed-day monthly task recurrence
+ * (`M:<date>` occurrences) is a different concept and is unaffected.
  */
 data class GameRefreshRules(
     val zoneId: ZoneId,
     val dailyRefresh: LocalTime,
     val weeklyRefreshDay: DayOfWeek,
     val weeklyRefreshTime: LocalTime,
+    val monthlyRefreshDays: Set<Int> = emptySet(),
 ) {
     init {
         require(!dailyRefresh.isBefore(LocalTime.MIDNIGHT)) { "每日刷新时间无效" }
         require(!weeklyRefreshTime.isBefore(LocalTime.MIDNIGHT)) { "每周刷新时间无效" }
+        require(monthlyRefreshDays.all { it in 1..31 }) { "每月刷新日需为 1–31" }
     }
 
     val dailyRefreshMinutes: Int
@@ -46,17 +55,22 @@ data class GameRefreshRules(
     val weeklyRefreshMinutes: Int
         get() = weeklyRefreshTime.hour * 60 + weeklyRefreshTime.minute
 
+    /** True when WEEKLY work is windowed by monthly refresh days instead of weeks. */
+    val monthly: Boolean get() = monthlyRefreshDays.isNotEmpty()
+
     companion object {
         fun fromMinutes(
             zoneId: ZoneId,
             dailyRefreshMinutes: Int,
             weeklyRefreshDayIso: Int,
             weeklyRefreshMinutes: Int,
+            monthlyRefreshDays: Set<Int> = emptySet(),
         ): GameRefreshRules = GameRefreshRules(
             zoneId = zoneId,
             dailyRefresh = LocalTime.of(dailyRefreshMinutes / 60, dailyRefreshMinutes % 60),
             weeklyRefreshDay = DayOfWeek.of(weeklyRefreshDayIso.coerceIn(1, 7)),
             weeklyRefreshTime = LocalTime.of(weeklyRefreshMinutes / 60, weeklyRefreshMinutes % 60),
+            monthlyRefreshDays = monthlyRefreshDays,
         )
 
         /** Provisional defaults; the UI marks them as user-configured values. */
@@ -111,52 +125,93 @@ object GameCalendar {
     fun representativeInstant(gameDate: LocalDate, rules: GameRefreshRules): Instant =
         gameDayStart(gameDate, rules).plusMillis(12 * 60 * 60 * 1000L)
 
-    /** The weekly window that contains [at]. Boundaries honour the stored timezone. */
-    fun weeklyWindow(at: Instant, rules: GameRefreshRules): GameWeekWindow {
-        val zonedAt = at.atZone(rules.zoneId)
-        val previousOrSame = zonedAt.toLocalDate()
-            .with(TemporalAdjusters.previousOrSame(rules.weeklyRefreshDay))
-        var start = ZonedDateTime.of(previousOrSame, rules.weeklyRefreshTime, rules.zoneId)
-        if (start.toInstant() > at) {
-            start = start.minusWeeks(1)
+    /**
+     * The refresh-to-refresh window that contains [at].
+     *
+     * With no [GameRefreshRules.monthlyRefreshDays] the window is the shipped seven-day
+     * one. With monthly refresh days it runs from the latest existing monthly refresh
+     * instant at or before [at] to the next one. A monthly day that does not exist in a
+     * short month is skipped (never clamped), so February simply has fewer boundaries.
+     */
+    fun refreshWindow(at: Instant, rules: GameRefreshRules): GameWeekWindow =
+        windowFromStart(refreshWindowStart(at, rules), rules)
+
+    /** Backward-compatible name for [refreshWindow]; monthly rules are honoured too. */
+    fun weeklyWindow(at: Instant, rules: GameRefreshRules): GameWeekWindow =
+        refreshWindow(at, rules)
+
+    private fun refreshWindowStart(at: Instant, rules: GameRefreshRules): ZonedDateTime {
+        if (!rules.monthly) {
+            val zonedAt = at.atZone(rules.zoneId)
+            val previousOrSame = zonedAt.toLocalDate()
+                .with(TemporalAdjusters.previousOrSame(rules.weeklyRefreshDay))
+            var start = ZonedDateTime.of(previousOrSame, rules.weeklyRefreshTime, rules.zoneId)
+            if (start.toInstant() > at) start = start.minusWeeks(1)
+            return start
         }
-        return windowFromStart(start, rules)
+        var month = YearMonth.from(at.atZone(rules.zoneId))
+        // Three months is enough for every valid 1..31 set; the loop is bounded so a
+        // malformed rule can never spin.
+        repeat(3) {
+            rules.monthlyRefreshDays.sortedDescending().forEach { day ->
+                if (day <= month.lengthOfMonth()) {
+                    val candidate = ZonedDateTime.of(
+                        month.atDay(day),
+                        rules.weeklyRefreshTime,
+                        rules.zoneId,
+                    )
+                    if (!candidate.toInstant().isAfter(at)) return candidate
+                }
+            }
+            month = month.minusMonths(1)
+        }
+        error("每月刷新日无法解析：${rules.monthlyRefreshDays}")
     }
 
     /**
-     * The window whose refresh instant is exactly [windowStart] at the configured
-     * weekly refresh time. Returns null when [windowStart] is not the configured
-     * weekday, so callers cannot invent a window that never starts.
+     * The window whose refresh instant is exactly [windowStart]. For weekly rules the
+     * date must be the configured weekday; for monthly rules its day number must be a
+     * configured monthly day. Callers therefore cannot invent a window that never starts.
      */
-    fun weeklyWindowStartingOn(
+    fun refreshWindowStartingOn(
         windowStart: LocalDate,
         rules: GameRefreshRules,
     ): GameWeekWindow? {
-        if (windowStart.dayOfWeek != rules.weeklyRefreshDay) return null
+        if (rules.monthly) {
+            if (windowStart.dayOfMonth !in rules.monthlyRefreshDays) return null
+        } else if (windowStart.dayOfWeek != rules.weeklyRefreshDay) {
+            return null
+        }
         return windowFromStart(
             ZonedDateTime.of(windowStart, rules.weeklyRefreshTime, rules.zoneId),
             rules,
         )
     }
 
+    /** Backward-compatible name for [refreshWindowStartingOn]. */
+    fun weeklyWindowStartingOn(
+        windowStart: LocalDate,
+        rules: GameRefreshRules,
+    ): GameWeekWindow? = refreshWindowStartingOn(windowStart, rules)
+
     /**
-     * Every weekly window that intersects the game day [gameDate].
+     * Every refresh window that intersects the game day [gameDate].
      *
-     * A game day starts at the daily refresh. When the weekly refresh happens later
-     * in the same civil day, that game day contains the weekly boundary and therefore
-     * touches two windows: the closing one and the opening one. Returning both keeps
-     * historical corrections explicit instead of silently choosing one.
+     * A game day starts at the daily refresh. When the (weekly or monthly) refresh
+     * instant happens later in the same civil day, that game day contains the boundary
+     * and therefore touches two windows: the closing one and the opening one. Returning
+     * both keeps historical corrections explicit instead of silently choosing one.
      */
-    fun weeklyWindowsForGameDate(
+    fun refreshWindowsForGameDate(
         gameDate: LocalDate,
         rules: GameRefreshRules,
     ): List<GameWeekWindow> {
         val dayStart = gameDayStart(gameDate, rules)
         val dayEndExclusive = nextGameDayStart(gameDate, rules)
-        val first = weeklyWindow(dayStart, rules)
+        val first = refreshWindow(dayStart, rules)
         val lastInstant = dayEndExclusive.minusNanos(1)
         if (!lastInstant.isAfter(dayStart)) return listOf(first)
-        val second = weeklyWindow(lastInstant, rules)
+        val second = refreshWindow(lastInstant, rules)
         return if (second.startInstant == first.startInstant) {
             listOf(first)
         } else {
@@ -164,14 +219,24 @@ object GameCalendar {
         }
     }
 
+    /** Backward-compatible name for [refreshWindowsForGameDate]. */
+    fun weeklyWindowsForGameDate(
+        gameDate: LocalDate,
+        rules: GameRefreshRules,
+    ): List<GameWeekWindow> = refreshWindowsForGameDate(gameDate, rules)
+
     /**
-     * The weekly window used when a historical *game date* is selected without an
-     * explicit window. A weekly boundary may fall inside a game day; midday of that
+     * The refresh window used when a historical *game date* is selected without an
+     * explicit window. A refresh boundary may fall inside a game day; midday of that
      * game day picks the window that covers the rest of the day. Callers that must be
-     * unambiguous pass an explicit window start (see [weeklyWindowsForGameDate]).
+     * unambiguous pass an explicit window start.
      */
+    fun refreshWindowForGameDate(gameDate: LocalDate, rules: GameRefreshRules): GameWeekWindow =
+        refreshWindow(representativeInstant(gameDate, rules), rules)
+
+    /** Backward-compatible name for [refreshWindowForGameDate]. */
     fun weeklyWindowForGameDate(gameDate: LocalDate, rules: GameRefreshRules): GameWeekWindow =
-        weeklyWindow(representativeInstant(gameDate, rules), rules)
+        refreshWindowForGameDate(gameDate, rules)
 
     /** First instant of the hosting period (its start game day). */
     fun periodStartInstant(startDate: LocalDate, rules: GameRefreshRules): Instant =
@@ -209,22 +274,72 @@ object GameCalendar {
 
     private fun windowFromStart(start: ZonedDateTime, rules: GameRefreshRules): GameWeekWindow {
         val startInstant = start.toInstant()
+        val end = if (rules.monthly) {
+            nextMonthlyRefreshStart(start, rules)
+        } else {
+            start.plusWeeks(1)
+        }
+        // Weekly labels seven dates (a 7x24h interval ends at 05:00 on the day after the
+        // last label). Monthly windows label every civil date the interval covers.
+        val endDate = if (rules.monthly) {
+            end.toLocalDate().minusDays(
+                if (end.toLocalTime().isAfter(rules.dailyRefresh)) 1 else 0,
+            ).coerceAtLeast(start.toLocalDate())
+        } else {
+            start.toLocalDate().plusDays(6)
+        }
         return GameWeekWindow(
             startInstant = startInstant,
-            endExclusiveInstant = start.plusWeeks(1).toInstant(),
+            endExclusiveInstant = end.toInstant(),
             startDate = start.toLocalDate(),
-            // Seven labelled dates: the window is a 7x24h interval, so its last
-            // calendar date is start + 6 even though the interval ends at 05:00 the
-            // following week.
-            endDate = start.toLocalDate().plusDays(6),
+            endDate = endDate,
             gameDateAtStart = gameDate(startInstant, rules),
         )
+    }
+
+    /**
+     * The next existing monthly refresh instant strictly after [start]. Absent days
+     * (29–31 in short months) are skipped, never clamped to the month end.
+     */
+    private fun nextMonthlyRefreshStart(
+        start: ZonedDateTime,
+        rules: GameRefreshRules,
+    ): ZonedDateTime {
+        var date = start.toLocalDate().plusDays(1)
+        val limit = date.plusDays(70)
+        while (!date.isAfter(limit)) {
+            if (date.dayOfMonth in rules.monthlyRefreshDays) {
+                val candidate = ZonedDateTime.of(date, rules.weeklyRefreshTime, rules.zoneId)
+                if (candidate.toInstant().isAfter(start.toInstant())) return candidate
+            }
+            date = date.plusDays(1)
+        }
+        error("每月刷新日无法解析：${rules.monthlyRefreshDays}")
     }
 
     /** Inclusive hosting dates: the first day counts as day 1. */
     fun hostingEndDate(startDate: LocalDate, durationDays: Int): LocalDate {
         require(durationDays > 0) { "托管天数必须大于 0" }
         return startDate.plusDays(durationDays.toLong() - 1)
+    }
+
+    /** Returns the date on which [serviceDays] selected-weekday services finish. */
+    fun hostingEndDateForWeekdays(
+        startDate: LocalDate,
+        serviceDays: Int,
+        weekdays: Set<DayOfWeek>,
+    ): LocalDate {
+        require(serviceDays > 0) { "托管天数必须大于 0" }
+        require(weekdays.isNotEmpty()) { "工作日托管至少选择一个星期" }
+        var date = startDate
+        var count = 0
+        while (true) {
+            if (date.dayOfWeek in weekdays) {
+                count++
+                if (count == serviceDays) return date
+            }
+            date = date.plusDays(1)
+        }
     }
 
     fun inclusiveDurationDays(startDate: LocalDate, endDate: LocalDate): Int {

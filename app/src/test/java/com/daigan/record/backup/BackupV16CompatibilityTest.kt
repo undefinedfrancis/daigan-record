@@ -8,13 +8,50 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class BackupV16CompatibilityTest {
+    /**
+     * Columns that did not exist in the oldest restorable generation, per table.
+     *
+     * `game_accounts` accumulated two: loginDevice (schema 9) and resourceNotes
+     * (schema 11). A legacy file may carry neither, either, or both, so the legacy
+     * shape is "every current column minus this set".
+     */
     private val added = mapOf(
-        "orders" to "cancelledAt",
-        "task_definitions" to "monthDay",
-        "template_tasks" to "monthDay",
-        "game_accounts" to "loginDevice",
+        // schema 13 adds the hosting mode and agreed round count, schema 14 the order colour.
+        "orders" to setOf(
+            "cancelledAt", "archivedAt", "hostingMode", "targetSessions", "orderColor",
+            "monthlyRefreshDays",
+        ),
+        "hosting_periods" to setOf(
+            "serviceDays", "serviceWeekdays", "monthlyRefreshDays", "serviceCount",
+        ),
+        "task_definitions" to setOf(
+            "monthDay", "monthDays", "retiredAt", "activeFrom",
+            "activeUntil", "numericMode", "colorArgb",
+        ),
+        "template_tasks" to setOf(
+            "monthDay", "monthDays", "activeFrom", "activeUntil", "numericMode",
+        ),
+        "template_categories" to setOf("hostingMode", "targetSessions", "serviceWeekdays"),
+        "game_accounts" to setOf("loginDevice", "resourceNotes", "categoryId"),
+        "game_templates" to setOf(
+            "hostingMode", "targetSessions", "serviceWeekdays", "defaultOrderTitle",
+        ),
     )
-    private val v17NewTables = setOf("game_server_options", "order_price_changes")
+
+    /**
+     * 合成一个"旧代次文件"：内容按旧列集裁剪，并声明它当年真实的便携 schema。
+     * 解码器只对低于当前版本的输入放行缺列，因此这里必须同时改声明版本。
+     */
+    private fun encodeLegacy(dataSet: BackupDataSet, schema: Int): String =
+        BackupDataCodec.encode(dataSet).replace("\"schemaVersion\":15", "\"schemaVersion\":$schema")
+
+    private fun legacyColumns(table: BackupTableCatalog.Table): List<BackupTableCatalog.Column> =
+        table.columns.filter { it.name !in added[table.name].orEmpty() }
+    private val v17NewTables = setOf(
+        "game_server_options", "order_price_changes",
+        // schema 15 新增：旧文件里整张表都不存在。
+        "account_categories", "hosting_sessions", "task_progress_events",
+    )
     private val legacyRows: Map<String, Map<String, Any?>> = mapOf(
         "orders" to linkedMapOf(
             "id" to "order-old", "accountId" to "account-old", "type" to "SHORT_TASK",
@@ -54,7 +91,7 @@ class BackupV16CompatibilityTest {
     }
 
     private fun legacyData(): BackupDataSet = BackupDataSet(BackupTableCatalog.includedTables.map { table ->
-        val legacyTable = table.copy(columns = table.columns.filter { it.name != added[table.name] })
+        val legacyTable = table.copy(columns = legacyColumns(table))
         val data = legacyRows[table.name]
         BackupDataSet.TableRows(legacyTable, if (data == null) emptyList() else
             listOf(legacyTable.columns.map { column -> value(data.getValue(column.name)) }))
@@ -62,7 +99,7 @@ class BackupV16CompatibilityTest {
 
     @Test
     fun versionSevenBackupAddsNullFieldsWithoutShiftingAnyLegacyValue() {
-        val decoded = BackupDataCodec.decode(BackupDataCodec.encode(legacyData()))
+        val decoded = BackupDataCodec.decode(encodeLegacy(legacyData(), 7), 7)
         assertEquals(BackupTableCatalog.includedTables.size, decoded.tables.size)
         for ((name, expected) in legacyRows) {
             val table = decoded.tables.single { it.table.name == name }
@@ -70,7 +107,9 @@ class BackupV16CompatibilityTest {
             for ((column, original) in expected) {
                 assertEquals("$name.$column", value(original), row[table.table.columnNames.indexOf(column)])
             }
-            assertNull("$name new field", row[table.table.columnNames.indexOf(added.getValue(name))])
+            for (newColumn in added.getValue(name)) {
+                assertNull("$name.$newColumn new field", row[table.table.columnNames.indexOf(newColumn)])
+            }
         }
         assertEquals(4, decoded.tables.sumOf { it.rows.size })
     }
@@ -78,7 +117,15 @@ class BackupV16CompatibilityTest {
     @Test
     fun missingAnyOriginalColumnIsRejectedEvenWhenNewColumnsAreOptional() {
         val legacy = legacyData()
+        // 只针对**物理列**：legacy-only 列（历史网页扩展）本来就不写出。
         for (target in legacy.tables) for (columnIndex in target.table.columns.indices) {
+            if (target.table.columns[columnIndex].legacyOnly) continue
+            // 读取兼容白名单里的列本来就允许缺失（例如 13/14 文件的 periodId）。
+            if (target.table.columns[columnIndex].name in
+                BackupTableCatalog.legacyOptionalColumns[target.table.name].orEmpty()
+            ) {
+                continue
+            }
             val broken = BackupDataSet(legacy.tables.map { table ->
                 if (table.table.name != target.table.name) table else BackupDataSet.TableRows(
                     table.table.copy(columns = table.table.columns.filterIndexed { index, _ -> index != columnIndex }),
@@ -86,7 +133,7 @@ class BackupV16CompatibilityTest {
                 )
             })
             try {
-                BackupDataCodec.decode(BackupDataCodec.encode(broken))
+                BackupDataCodec.decode(encodeLegacy(broken, 7), 7)
                 fail("Accepted missing legacy column ${target.table.name}.${target.table.columns[columnIndex].name}")
             } catch (_: BackupException) { }
         }
@@ -95,13 +142,11 @@ class BackupV16CompatibilityTest {
     @Test
     fun v16BackupWithoutNewTablesRestoresWithEmptyCollectionsAndNullDevice() {
         // A real v1.6 file has no game_server_options / order_price_changes tables at all
-        // and no game_accounts.loginDevice column.
+        // and no game_accounts.loginDevice or resourceNotes column.
         val legacyTables = BackupTableCatalog.includedTables
             .filter { it.name !in v17NewTables }
             .map { table ->
-                val spec = table.copy(columns = table.columns.filter {
-                    it.name != "loginDevice" && it.name != added[table.name]
-                })
+                val spec = table.copy(columns = legacyColumns(table))
                 val data = legacyRows[table.name]
                 BackupDataSet.TableRows(
                     spec,
@@ -109,17 +154,17 @@ class BackupV16CompatibilityTest {
                         listOf(spec.columns.map { column -> value(data.getValue(column.name)) }),
                 )
             }
-        val decoded = BackupDataCodec.decode(BackupDataCodec.encode(BackupDataSet(legacyTables)))
+        val decoded = BackupDataCodec.decode(encodeLegacy(BackupDataSet(legacyTables), 8), 8)
         assertEquals(0, decoded.count("game_server_options"))
         assertEquals(0, decoded.count("order_price_changes"))
-        val account = decoded.tables.single { it.table.name == "game_accounts" }.rows.single()
-        assertNull(account[decoded.tables.single { it.table.name == "game_accounts" }
-            .table.columnNames.indexOf("loginDevice")])
-        assertEquals(
-            value("旧游戏"),
-            account[decoded.tables.single { it.table.name == "game_accounts" }
-                .table.columnNames.indexOf("gameName")],
+        val accountTable = decoded.tables.single { it.table.name == "game_accounts" }
+        val account = accountTable.rows.single()
+        assertNull(account[accountTable.table.columnNames.indexOf("loginDevice")])
+        assertNull(
+            "a v1.6 backup predates resourceNotes and restores it as NULL",
+            account[accountTable.table.columnNames.indexOf("resourceNotes")],
         )
+        assertEquals(value("旧游戏"), account[accountTable.table.columnNames.indexOf("gameName")])
     }
 
     @Test
@@ -130,10 +175,15 @@ class BackupV16CompatibilityTest {
                 when (tableRows.table.name) {
                     "game_accounts" -> {
                         val spec = BackupTableCatalog.table("game_accounts")!!
+                        val legacyRow = tableRows.rows.single()
                         val row = spec.columns.map { column ->
-                            if (column.name == "loginDevice") JsonPrimitive("平板") else {
-                                val legacy = tableRows.rows.single()
-                                legacy[tableRows.table.columnNames.indexOf(column.name)]
+                            when (column.name) {
+                                "loginDevice" -> JsonPrimitive("平板")
+                                "resourceNotes" -> JsonPrimitive("3 星专武 · 60 抽")
+                                // 新列（如 schema 15 的 categoryId）在旧行里没有位置。
+                                else -> tableRows.table.columnNames.indexOf(column.name)
+                                    .takeIf { it >= 0 }
+                                    ?.let { legacyRow[it] }
                             }
                         }
                         BackupDataSet.TableRows(spec, listOf(row))
@@ -164,9 +214,14 @@ class BackupV16CompatibilityTest {
                 }
             })
         }
-        val decoded = BackupDataCodec.decode(BackupDataCodec.encode(full))
+        // v1.7 形状的文件：声明 schema 9，缺列只允许出现在历史白名单里。
+        val decoded = BackupDataCodec.decode(encodeLegacy(full, 9), 9)
         val account = decoded.tables.single { it.table.name == "game_accounts" }
         assertEquals("平板", (account.rows.single()[account.table.columnNames.indexOf("loginDevice")] as JsonPrimitive).content)
+        assertEquals(
+            "3 星专武 · 60 抽",
+            (account.rows.single()[account.table.columnNames.indexOf("resourceNotes")] as JsonPrimitive).content,
+        )
         assertEquals(1, decoded.count("game_server_options"))
         assertEquals(1, decoded.count("order_price_changes"))
     }

@@ -42,10 +42,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.daigan.record.data.model.HostingMode
+import com.daigan.record.data.model.NumericMode
 import com.daigan.record.data.model.ProgressType
 import com.daigan.record.data.model.RecurrenceType
 import com.daigan.record.data.model.TemplateCategoryDraft
 import com.daigan.record.data.model.TemplateDraft
+import com.daigan.record.data.model.TemplatePricePresetDraft
 import com.daigan.record.data.model.TemplateTaskDraft
 import com.daigan.record.ui.components.EmptyStateCard
 import com.daigan.record.ui.components.PageHeader
@@ -84,6 +87,12 @@ fun TemplateEditorScreen(
         onAddTask = viewModel::addTask,
         onRemoveTask = viewModel::removeTask,
         onUpdateTask = viewModel::updateTask,
+        onAddPricePreset = viewModel::addPricePreset,
+        onRemovePricePreset = viewModel::removePricePreset,
+        onUpdatePricePreset = viewModel::updatePricePreset,
+        onAddServerOption = viewModel::addServerOption,
+        onRenameServerOption = viewModel::renameServerOption,
+        onRemoveServerOption = viewModel::removeServerOption,
         onSave = viewModel::save,
         onCancel = requestBack,
         modifier = modifier,
@@ -122,12 +131,21 @@ internal fun TemplateEditorContent(
     onAddTask: (Int) -> Unit,
     onRemoveTask: (Int, Int) -> Unit,
     onUpdateTask: (Int, Int, (TemplateTaskDraft) -> TemplateTaskDraft) -> Unit,
+    onAddPricePreset: () -> Unit,
+    onRemovePricePreset: (Int) -> Unit,
+    onUpdatePricePreset: (Int, (TemplatePricePresetDraft) -> TemplatePricePresetDraft) -> Unit,
+    onAddServerOption: (String) -> Unit = {},
+    onRenameServerOption: (String, String) -> Unit = { _, _ -> },
+    onRemoveServerOption: (String) -> Unit = {},
     onSave: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val draft = uiState.draft
     val errors = uiState.errors
+    var showServerAdd by remember { mutableStateOf(false) }
+    var renameServerTarget by remember { mutableStateOf<String?>(null) }
+    var removeServerTarget by remember { mutableStateOf<String?>(null) }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -197,6 +215,158 @@ internal fun TemplateEditorContent(
                                 supportingText = { errors["gameVersionNotes"]?.let { Text(it) } },
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            OutlinedTextField(
+                                value = draft.defaultOrderTitle,
+                                onValueChange = { value ->
+                                    onDraftChange { it.copy(defaultOrderTitle = value) }
+                                },
+                                label = { Text("默认订单标题（选填）") },
+                                singleLine = true,
+                                isError = errors.containsKey("defaultOrderTitle"),
+                                supportingText = {
+                                    errors["defaultOrderTitle"]?.let { Text(it) }
+                                        ?: Text(
+                                            "建单时仅在标题未被手改时预填；留空不预填",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("template-default-order-title"),
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text("托管方式", style = MaterialTheme.typography.titleMedium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = !draft.countBased,
+                                    onClick = {
+                                        onDraftChange {
+                                            it.copy(
+                                                hostingMode = HostingMode.DATE_RANGE,
+                                                hostingModeExplicit = true,
+                                            )
+                                        }
+                                    },
+                                    label = { Text("按日期托管") },
+                                )
+                                FilterChip(
+                                    selected = draft.countBased,
+                                    onClick = {
+                                        onDraftChange {
+                                            it.copy(
+                                                hostingMode = HostingMode.COUNT_BASED,
+                                                hostingModeExplicit = true,
+                                            )
+                                        }
+                                    },
+                                    label = { Text("打卡式托管") },
+                                    modifier = Modifier.testTag("template-count-mode"),
+                                )
+                            }
+                            if (draft.countBased) {
+                                OutlinedTextField(
+                                    value = draft.targetSessionsText,
+                                    onValueChange = { value ->
+                                        onDraftChange { it.copy(targetSessionsText = value) }
+                                    },
+                                    label = { Text("目标打卡次数") },
+                                    singleLine = true,
+                                    isError = errors.containsKey("targetSessions"),
+                                    supportingText = {
+                                        errors["targetSessions"]?.let { Text(it) }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("template-target-sessions"),
+                                )
+                                Text(
+                                    text = "每轮需完成全部任务才计 1 次，同一天可完成多轮；" +
+                                        "不设开始/截止日期，未打卡的日子不扣次数。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Text(
+                                    text = "沿用按日期托管；新订单在建单时填写开始与到期日期。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "区服预设（该游戏）",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    onClick = { showServerAdd = true },
+                                    enabled = draft.gameName.isNotBlank(),
+                                    modifier = Modifier.testTag("template-server-add"),
+                                ) {
+                                    Icon(Icons.Filled.Add, contentDescription = null)
+                                    Text("添加区服", modifier = Modifier.padding(start = 4.dp))
+                                }
+                            }
+                            Text(
+                                text = "新建或编辑账号时，该游戏的区服可从这里预设的列表下拉选择；" +
+                                    "也可继续手填。修改或删除预设不会改写已保存账号的区服。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            when {
+                                draft.gameName.isBlank() -> Text(
+                                    text = "先填写游戏名称，再维护该游戏的区服预设。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+
+                                uiState.serverOptions.isEmpty() -> Text(
+                                    text = "该游戏还没有区服预设；账号表单仍可手填区服。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+
+                                else -> uiState.serverOptions.forEach { option ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(text = option, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = { renameServerTarget = option }) {
+                                            Text("改名")
+                                        }
+                                        TextButton(onClick = { removeServerTarget = option }) {
+                                            Text("删除")
+                                        }
+                                    }
+                                }
+                            }
+                            uiState.serverError?.let { message ->
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }
@@ -272,6 +442,93 @@ internal fun TemplateEditorContent(
                     }
                 }
 
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "接单价格预设（选填）",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = onAddPricePreset) {
+                                    Icon(Icons.Filled.Add, contentDescription = null)
+                                    Text("添加价格", modifier = Modifier.padding(start = 4.dp))
+                                }
+                            }
+                            Text(
+                                text = "接单时可从下拉列表直接选择这些价格；修改或删除预设不会影响已创建订单的价格。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            errors["pricePresets"]?.let { message ->
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            if (draft.pricePresets.isEmpty()) {
+                                Text(
+                                    text = "还没有预设价格；接单时仍可手动输入。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            draft.pricePresets.forEachIndexed { index, preset ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    OutlinedTextField(
+                                        value = preset.amountText,
+                                        onValueChange = { value ->
+                                            onUpdatePricePreset(index) {
+                                                it.copy(amountText = value)
+                                            }
+                                        },
+                                        label = { Text("价格（元）") },
+                                        singleLine = true,
+                                        isError = errors.containsKey("pricePreset.$index.amount"),
+                                        supportingText = {
+                                            errors["pricePreset.$index.amount"]?.let { Text(it) }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("template-price-preset-$index-amount"),
+                                    )
+                                    TextButton(
+                                        onClick = { onRemovePricePreset(index) },
+                                        modifier = Modifier.testTag("template-price-preset-$index-remove"),
+                                    ) { Text("删除") }
+                                }
+                                OutlinedTextField(
+                                    value = preset.label,
+                                    onValueChange = { value ->
+                                        onUpdatePricePreset(index) { it.copy(label = value) }
+                                    },
+                                    label = { Text("名称（选填）") },
+                                    singleLine = true,
+                                    isError = errors.containsKey("pricePreset.$index.label"),
+                                    supportingText = {
+                                        errors["pricePreset.$index.label"]?.let { Text(it) }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("template-price-preset-$index-label"),
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (uiState.errorMessages.isNotEmpty() || uiState.saveError != null) {
                     item {
                         Card(
@@ -318,6 +575,70 @@ internal fun TemplateEditorContent(
             }
         }
     }
+
+    if (showServerAdd) {
+        TemplateOptionNameDialog(
+            title = "添加区服预设",
+            initial = "",
+            onDismiss = { showServerAdd = false },
+            onConfirm = { value ->
+                showServerAdd = false
+                onAddServerOption(value)
+            },
+        )
+    }
+    renameServerTarget?.let { option ->
+        TemplateOptionNameDialog(
+            title = "修改区服名称",
+            initial = option,
+            onDismiss = { renameServerTarget = null },
+            onConfirm = { value ->
+                renameServerTarget = null
+                onRenameServerOption(option, value)
+            },
+        )
+    }
+    removeServerTarget?.let { option ->
+        AlertDialog(
+            onDismissRequest = { removeServerTarget = null },
+            title = { Text("删除区服预设？") },
+            text = { Text("删除「$option」后，已保存账号的区服保持不变。此操作不能撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removeServerTarget = null
+                    onRemoveServerOption(option)
+                }) { Text("确认删除") }
+            },
+            dismissButton = { TextButton(onClick = { removeServerTarget = null }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun TemplateOptionNameDialog(
+    title: String,
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("区服名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Button(enabled = text.isNotBlank(), onClick = { onConfirm(text.trim()) }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -441,6 +762,36 @@ private fun TaskEditor(
                 )
             }
             if (task.progressType == ProgressType.NUMERIC) {
+                Text("数值口径", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = task.effectiveNumericMode == NumericMode.PER_OCCURRENCE,
+                        onClick = {
+                            onUpdate { it.copy(numericMode = NumericMode.PER_OCCURRENCE) }
+                        },
+                        label = { Text("逐次目标") },
+                        modifier = Modifier.testTag(
+                            "template-task-$categoryIndex-$taskIndex-mode-occurrence",
+                        ),
+                    )
+                    FilterChip(
+                        selected = task.effectiveNumericMode == NumericMode.CUMULATIVE,
+                        onClick = {
+                            onUpdate { it.copy(numericMode = NumericMode.CUMULATIVE) }
+                        },
+                        label = { Text("累计总值") },
+                        modifier = Modifier.testTag(
+                            "template-task-$categoryIndex-$taskIndex-mode-cumulative",
+                        ),
+                    )
+                }
+                if (task.effectiveNumericMode == NumericMode.CUMULATIVE) {
+                    Text(
+                        text = "建单后打卡时填写当前累计总值，目标只判断一次。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -516,7 +867,7 @@ private fun TaskEditor(
                 RecurrenceType.MONTHLY -> OutlinedTextField(
                         value = task.monthDay,
                         onValueChange = { value -> onUpdate { it.copy(monthDay = value) } },
-                        label = { Text("每月几号（1–31；当月无该日则跳过）") },
+                        label = { Text("每月日号（如 1,15）（1–31；当月无该日则跳过）") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -529,6 +880,32 @@ private fun TaskEditor(
                 )
 
                 RecurrenceType.DAILY, RecurrenceType.WEEKLY -> Unit
+            }
+            Text("生效日期（选填）", style = MaterialTheme.typography.labelMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = task.activeFrom,
+                    onValueChange = { value -> onUpdate { it.copy(activeFrom = value) } },
+                    label = { Text("开始生效") },
+                    placeholder = { Text("2026-10-01") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("template-task-$categoryIndex-$taskIndex-active-from"),
+                )
+                OutlinedTextField(
+                    value = task.activeUntil,
+                    onValueChange = { value -> onUpdate { it.copy(activeUntil = value) } },
+                    label = { Text("停止生效") },
+                    placeholder = { Text("2026-12-31") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("template-task-$categoryIndex-$taskIndex-active-until"),
+                )
             }
             taskErrors.forEach { message ->
                 Text(

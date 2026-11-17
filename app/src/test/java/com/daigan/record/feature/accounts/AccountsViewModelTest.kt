@@ -1,7 +1,10 @@
 package com.daigan.record.feature.accounts
 
 import com.daigan.record.data.model.OwnerSummary
+import com.daigan.record.testing.FakeAccountCategoryRepository
+import com.daigan.record.testing.FakeGameAccountRepository
 import com.daigan.record.testing.FakeOwnerRepository
+import com.daigan.record.testing.InMemoryUiPreferenceStore
 import com.daigan.record.testing.MainDispatcherRule
 import com.daigan.record.testing.account
 import com.daigan.record.testing.owner
@@ -29,7 +32,7 @@ class AccountsViewModelTest {
         repository.archivedOwners.value = listOf(
             OwnerSummary(owner(id = "o2", number = 2, nickname = "阿橙", archived = true), emptyList()),
         )
-        val viewModel = AccountsViewModel(repository, com.daigan.record.testing.FakeOrderRepository())
+        val viewModel = AccountsViewModel(repository, com.daigan.record.testing.FakeOrderRepository(), FakeGameAccountRepository(), FakeAccountCategoryRepository(), InMemoryUiPreferenceStore())
 
         val state = viewModel.uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
 
@@ -41,7 +44,7 @@ class AccountsViewModelTest {
 
     @Test
     fun `empty database produces an empty success state`() = runTest {
-        val viewModel = AccountsViewModel(FakeOwnerRepository(), com.daigan.record.testing.FakeOrderRepository())
+        val viewModel = AccountsViewModel(FakeOwnerRepository(), com.daigan.record.testing.FakeOrderRepository(), FakeGameAccountRepository(), FakeAccountCategoryRepository(), InMemoryUiPreferenceStore())
 
         val state = viewModel.uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
 
@@ -79,7 +82,7 @@ class AccountsViewModelTest {
         val first = shortOrder("o3", "first")
         val second = shortOrder("o3", "second")
         orders.shortOrders.value = listOf(first, second)
-        val viewModel = AccountsViewModel(owners, orders)
+        val viewModel = AccountsViewModel(owners, orders, FakeGameAccountRepository(), FakeAccountCategoryRepository(), InMemoryUiPreferenceStore())
         backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect { }
         }
@@ -115,13 +118,13 @@ class AccountsViewModelTest {
             today = date, status = status, tasks = emptyList(),
         )
         orders.hosting.value = listOf(hosting(com.daigan.record.core.time.HostingStatus.ACTIVE))
-        var state = AccountsViewModel(owners, orders).uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
+        var state = AccountsViewModel(owners, orders, FakeGameAccountRepository(), FakeAccountCategoryRepository(), InMemoryUiPreferenceStore()).uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
         assertEquals("o2", state.owners.first().owner.id)
         orders.hosting.value = listOf(hosting(com.daigan.record.core.time.HostingStatus.NOT_STARTED))
-        state = AccountsViewModel(owners, orders).uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
+        state = AccountsViewModel(owners, orders, FakeGameAccountRepository(), FakeAccountCategoryRepository(), InMemoryUiPreferenceStore()).uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
         assertEquals(1, state.owners.first().unfinishedOrderCount)
         orders.hosting.value = listOf(hosting(com.daigan.record.core.time.HostingStatus.EXPIRED))
-        state = AccountsViewModel(owners, orders).uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
+        state = AccountsViewModel(owners, orders, FakeGameAccountRepository(), FakeAccountCategoryRepository(), InMemoryUiPreferenceStore()).uiState.first { it is OwnersUiState.Success } as OwnersUiState.Success
         assertEquals(listOf("o1", "o2"), state.owners.map { it.owner.id })
         assertTrue(state.owners.all { it.unfinishedOrderCount == 0 })
     }

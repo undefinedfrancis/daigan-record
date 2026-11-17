@@ -7,6 +7,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -74,6 +76,12 @@ fun CompletionRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     enabled: Boolean = true,
+    /**
+     * Task-level colour override. Null means "inherit the order colour"; callers pass the
+     * already-resolved value (`task.colorArgb ?: order.colorArgb`) so the two levels stay
+     * distinct instead of one silently replacing the other.
+     */
+    colorArgb: Int? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -97,6 +105,15 @@ fun CompletionRow(
             onCheckedChange = null,
             enabled = enabled,
         )
+        if (colorArgb != null) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .size(10.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(com.daigan.record.ui.theme.OrderColors.mark(colorArgb)),
+            )
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,

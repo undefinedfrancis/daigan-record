@@ -1,0 +1,12 @@
+{
+  "functions": {
+    "server.mjs": {
+      "includeFiles": "releases/**",
+      "maxDuration": 120
+    }
+  },
+  "buildCommand": "node tools/prepare-release.mjs",
+  "regions": [
+    "hkg1"
+  ]
+}

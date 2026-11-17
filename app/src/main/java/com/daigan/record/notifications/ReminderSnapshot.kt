@@ -2,6 +2,7 @@ package com.daigan.record.notifications
 
 import com.daigan.record.core.time.GameCalendar
 import com.daigan.record.core.time.GameRefreshRules
+import com.daigan.record.core.time.HostingPeriodClock
 import com.daigan.record.data.local.entity.GameAccountEntity
 import com.daigan.record.data.local.entity.HostingPeriodEntity
 import com.daigan.record.data.local.entity.OrderEntity
@@ -26,6 +27,10 @@ data class ReminderTask(
     val everyNDays: Int?,
     val completed: Boolean,
     val monthDay: Int? = null,
+    val monthDays: Set<Int> = setOfNotNull(monthDay),
+    val activeFrom: LocalDate? = null,
+    /** 停止生效日：之后不再提醒（与今日页/日历同一规则）。 */
+    val activeUntil: LocalDate? = null,
 )
 
 /** One occurrence of a hosting task (only the latest period is relevant). */
@@ -39,6 +44,7 @@ data class ReminderPeriod(
     val startDate: LocalDate,
     val endDate: LocalDate,
     val refresh: GameRefreshRules,
+    val serviceWeekdays: Set<DayOfWeek> = emptySet(),
 )
 
 data class ReminderOrder(
@@ -54,6 +60,13 @@ data class ReminderOrder(
     val period: ReminderPeriod?,
     val tasks: List<ReminderTask>,
     val occurrences: List<ReminderOccurrence>,
+    /**
+     * 打卡式托管: measured in completed rounds, so neither "period ends today" nor the
+     * date-based due-task slot applies. Reminders for this mode are not part of Stage 1;
+     * excluding it is what keeps the calendar rules off an order that never agreed to
+     * a date.
+     */
+    val countBased: Boolean = false,
 )
 
 data class ReminderSnapshot(val orders: List<ReminderOrder>)
@@ -112,7 +125,8 @@ object ReminderEvaluator {
         }
 
         val expiring = snapshot.orders.filter { order ->
-            !order.archived && order.type == OrderType.HOSTING && order.period != null &&
+            !order.archived && !order.countBased && order.type == OrderType.HOSTING &&
+                order.period != null &&
                 GameCalendar.gameDate(now, order.period.refresh) == order.period.endDate
         }
         if (expiring.isNotEmpty()) {
@@ -132,7 +146,7 @@ object ReminderEvaluator {
                 OrderType.SHORT_TASK ->
                     if (order.completed) 0 else order.tasks.count { !it.completed }
 
-                OrderType.HOSTING -> dueHostingTaskIds(order, now).size
+                OrderType.HOSTING -> if (order.countBased) 0 else dueHostingTaskIds(order, now).size
             }
         }
         if (dueCount > 0) {
@@ -153,6 +167,7 @@ object ReminderEvaluator {
      * whole live window and a daily task is due only on its own game date.
      */
     fun dueHostingTaskIds(order: ReminderOrder, now: Instant): Set<String> {
+        if (order.countBased) return emptySet()
         val period = order.period ?: return emptySet()
         val rules = period.refresh
         val today = GameCalendar.gameDate(now, rules)
@@ -166,6 +181,10 @@ object ReminderEvaluator {
                 weekdays = task.weekdays,
                 everyNDays = task.everyNDays,
                 monthDay = task.monthDay,
+                monthDays = task.monthDays,
+                activeFrom = task.activeFrom,
+                activeUntil = task.activeUntil,
+                serviceWeekdays = period.serviceWeekdays,
                 periodStart = period.startDate,
                 periodEnd = period.endDate,
                 today = today,
@@ -192,20 +211,51 @@ object ReminderSnapshotBuilder {
         periods: List<HostingPeriodEntity>,
         tasks: List<TaskDefinitionEntity>,
         occurrences: List<TaskOccurrenceEntity>,
+        now: Instant,
     ): ReminderSnapshot {
         val accountsById = accounts.associateBy { it.id }
         val ownersById = owners.associateBy { it.id }
         val periodsById = periods.groupBy { it.orderId }
-        val tasksByPeriod = tasks.filter { it.periodId != null }.groupBy { it.periodId }
-        val tasksByOrder = tasks.filter { it.periodId == null }.groupBy { it.orderId }
+        val tasksByPeriod = tasks.filter { it.periodId != null && it.retiredAt == null }.groupBy { it.periodId }
+        val tasksByOrder = tasks.filter { it.periodId == null && it.retiredAt == null }.groupBy { it.orderId }
         val occurrencesByTask = occurrences.groupBy { it.taskDefinitionId }
 
         return ReminderSnapshot(
             orders = orders.mapNotNull { order ->
                 val account = accountsById[order.accountId] ?: return@mapNotNull null
                 val owner = ownersById[account.ownerId] ?: return@mapNotNull null
-                val latestPeriod = periodsById[order.id]?.maxByOrNull { it.periodIndex }
-                val periodTasks = latestPeriod?.let { tasksByPeriod[it.id].orEmpty() }.orEmpty()
+                val orderRefresh = GameRefreshRules.fromMinutes(
+                    zoneId = java.time.ZoneId.of(order.gameZoneId),
+                    dailyRefreshMinutes = order.dailyRefreshMinutes,
+                    weeklyRefreshDayIso = order.weeklyRefreshDay,
+                    weeklyRefreshMinutes = order.weeklyRefreshMinutes,
+                    monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(
+                        order.monthlyRefreshDays,
+                    ) ?: emptySet(),
+                )
+                // The period "today" is about, not the newest row: an early renewal adds
+                // a future period whose end date and tasks belong to a later day. Each
+                // period is judged by its own stored snapshot, the same rule the Today
+                // list and the completion write path use.
+                val displayPeriod = HostingPeriodClock.resolve(
+                    periods = periodsById[order.id].orEmpty(),
+                    now = now,
+                    rulesOf = { period ->
+                        GameRefreshRules.fromMinutes(
+                            zoneId = java.time.ZoneId.of(period.gameZoneId),
+                            dailyRefreshMinutes = period.dailyRefreshMinutes,
+                            weeklyRefreshDayIso = period.weeklyRefreshDay,
+                            weeklyRefreshMinutes = period.weeklyRefreshMinutes,
+                            monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(
+                                period.monthlyRefreshDays,
+                            ) ?: emptySet(),
+                        )
+                    },
+                    startDate = { it.startDate },
+                    endDate = { it.endDate },
+                    periodIndex = { it.periodIndex },
+                )?.period
+                val periodTasks = displayPeriod?.let { tasksByPeriod[it.id].orEmpty() }.orEmpty()
                 val shortTasks = tasksByOrder[order.id].orEmpty()
                 ReminderOrder(
                     orderId = order.id,
@@ -213,30 +263,31 @@ object ReminderSnapshotBuilder {
                     title = order.title,
                     ownerLabel = "#${owner.number} ${owner.nickname}",
                     accountLabel = "${account.gameName}·${account.server}",
-                    archived = order.cancelledAt != null || owner.archivedAt != null || account.archivedAt != null,
+                    archived = order.archivedAt != null || order.cancelledAt != null || owner.archivedAt != null || account.archivedAt != null,
                     completed = order.completedAt != null,
                     deadlineDate = order.deadlineDate,
-                    refresh = GameRefreshRules.fromMinutes(
-                        zoneId = java.time.ZoneId.of(order.gameZoneId),
-                        dailyRefreshMinutes = order.dailyRefreshMinutes,
-                        weeklyRefreshDayIso = order.weeklyRefreshDay,
-                        weeklyRefreshMinutes = order.weeklyRefreshMinutes,
-                    ),
-                    period = latestPeriod?.let { period ->
+                    refresh = orderRefresh,
+                    period = displayPeriod?.let { period ->
                         ReminderPeriod(
                             startDate = period.startDate,
                             endDate = period.endDate,
+                            serviceWeekdays = com.daigan.record.data.local.parseWeekdays(period.serviceWeekdays),
                             refresh = GameRefreshRules.fromMinutes(
                                 zoneId = java.time.ZoneId.of(period.gameZoneId),
                                 dailyRefreshMinutes = period.dailyRefreshMinutes,
                                 weeklyRefreshDayIso = period.weeklyRefreshDay,
                                 weeklyRefreshMinutes = period.weeklyRefreshMinutes,
+                                monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(
+                                    period.monthlyRefreshDays,
+                                ) ?: emptySet(),
                             ),
                         )
                     },
                     tasks = (if (order.type == OrderType.HOSTING) periodTasks else shortTasks).map {
                         it.toReminderTask()
                     },
+                    countBased = order.hostingMode ==
+                        com.daigan.record.data.model.HostingMode.COUNT_BASED,
                     occurrences = periodTasks.flatMap { task ->
                         occurrencesByTask[task.id].orEmpty().map { occurrence ->
                             ReminderOccurrence(
@@ -258,6 +309,9 @@ object ReminderSnapshotBuilder {
         weekdays = com.daigan.record.data.local.parseWeekdays(weekdays),
         everyNDays = everyNDays,
     monthDay = monthDay,
+        monthDays = com.daigan.record.data.model.parseMonthlyDates(monthDays) ?: setOfNotNull(monthDay),
+        activeFrom = activeFrom,
+        activeUntil = activeUntil,
         completed = completedAt != null,
     )
 }

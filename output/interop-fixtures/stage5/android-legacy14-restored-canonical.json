@@ -1,0 +1,274 @@
+{
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "exportedAt": 1773108000000,
+    "tables": {
+        "owners": [
+            {
+                "id": "f5c517a5-8d02-40fd-8af7-62268e19afb9",
+                "number": 1,
+                "nickname": "旧版老板",
+                "createdAt": 1773108000000,
+                "updatedAt": 1773108000000,
+                "archivedAt": null,
+                "archiveBatchId": null
+            }
+        ],
+        "owner_number_sequence": [
+            {
+                "id": 0,
+                "nextNumber": 2
+            }
+        ],
+        "account_categories": [],
+        "game_accounts": [
+            {
+                "id": "6536e89c-b3dc-44f2-a342-c498ffd8c9e5",
+                "ownerId": "f5c517a5-8d02-40fd-8af7-62268e19afb9",
+                "gameName": "旧版游戏",
+                "server": "官服",
+                "uid": "legacy-uid-1",
+                "loginAccount": "legacy-login",
+                "loginMethod": "VERIFICATION_CODE",
+                "password": null,
+                "createdAt": 1773108000000,
+                "updatedAt": 1773108000000,
+                "archivedAt": null,
+                "archiveBatchId": null,
+                "defaultTemplateId": null,
+                "loginDevice": null,
+                "resourceNotes": null,
+                "categoryId": null
+            }
+        ],
+        "game_server_options": [],
+        "game_templates": [],
+        "template_categories": [],
+        "template_tasks": [],
+        "template_price_presets": [],
+        "template_seed_state": [],
+        "completion_batches": [],
+        "orders": [
+            {
+                "id": "d158b2b4-5b40-4f89-83e4-2cad1cca3964",
+                "accountId": "6536e89c-b3dc-44f2-a342-c498ffd8c9e5",
+                "type": "HOSTING",
+                "title": "旧版日期托管",
+                "priceCents": null,
+                "paymentMode": "ONE_TIME",
+                "deadlineDate": null,
+                "notes": null,
+                "gameZoneId": "Asia/Shanghai",
+                "dailyRefreshMinutes": 240,
+                "weeklyRefreshDay": 1,
+                "weeklyRefreshMinutes": 300,
+                "createdAt": 1773108000000,
+                "updatedAt": 1773108000000,
+                "completedAt": null,
+                "sourceTemplateId": null,
+                "sourceTemplateName": null,
+                "sourceTemplateVersion": null,
+                "cancelledAt": null,
+                "archivedAt": null,
+                "hostingMode": "DATE_RANGE",
+                "targetSessions": null,
+                "orderColor": null,
+                "monthlyRefreshDays": null
+            },
+            {
+                "id": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "accountId": "6536e89c-b3dc-44f2-a342-c498ffd8c9e5",
+                "type": "HOSTING",
+                "title": "旧版打卡托管",
+                "priceCents": null,
+                "paymentMode": "INSTALLMENTS",
+                "deadlineDate": null,
+                "notes": null,
+                "gameZoneId": "Asia/Shanghai",
+                "dailyRefreshMinutes": 240,
+                "weeklyRefreshDay": 1,
+                "weeklyRefreshMinutes": 300,
+                "createdAt": 1773108000000,
+                "updatedAt": 1773108000000,
+                "completedAt": null,
+                "sourceTemplateId": null,
+                "sourceTemplateName": null,
+                "sourceTemplateVersion": null,
+                "cancelledAt": null,
+                "archivedAt": null,
+                "hostingMode": "COUNT_BASED",
+                "targetSessions": 3,
+                "orderColor": null,
+                "monthlyRefreshDays": null
+            }
+        ],
+        "hosting_periods": [
+            {
+                "id": "a38a7173-8711-4edc-be40-eda73e074617",
+                "orderId": "d158b2b4-5b40-4f89-83e4-2cad1cca3964",
+                "periodIndex": 0,
+                "startDate": "2026-03-10",
+                "endDate": "2026-03-15",
+                "priceCents": 6000,
+                "gameZoneId": "Asia/Shanghai",
+                "dailyRefreshMinutes": 240,
+                "weeklyRefreshDay": 1,
+                "weeklyRefreshMinutes": 300,
+                "createdAt": 1773108000000,
+                "renewalOperationId": null,
+                "serviceDays": null,
+                "serviceWeekdays": null,
+                "monthlyRefreshDays": null,
+                "serviceCount": null
+            },
+            {
+                "id": "811a4578-7c11-4dfa-96ef-0817b10e888a",
+                "orderId": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "periodIndex": 0,
+                "startDate": "2026-03-10",
+                "endDate": "2026-03-10",
+                "priceCents": 12000,
+                "gameZoneId": "Asia/Shanghai",
+                "dailyRefreshMinutes": 240,
+                "weeklyRefreshDay": 1,
+                "weeklyRefreshMinutes": 300,
+                "createdAt": 1773108000000,
+                "renewalOperationId": null,
+                "serviceDays": null,
+                "serviceWeekdays": null,
+                "monthlyRefreshDays": null,
+                "serviceCount": 3
+            }
+        ],
+        "hosting_sessions": [
+            {
+                "id": "d80ebb4f-f62c-4ead-be17-b40aa2c40122",
+                "orderId": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "sessionIndex": 1,
+                "createdAt": 1773108000000,
+                "completedAt": 1773108000000,
+                "completionBatchId": null,
+                "periodId": "811a4578-7c11-4dfa-96ef-0817b10e888a"
+            },
+            {
+                "id": "88285460-96b5-45f3-b8b0-b4cc63f5e28f",
+                "orderId": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "sessionIndex": 2,
+                "createdAt": 1773108000000,
+                "completedAt": null,
+                "completionBatchId": null,
+                "periodId": "811a4578-7c11-4dfa-96ef-0817b10e888a"
+            }
+        ],
+        "order_price_changes": [],
+        "task_definitions": [
+            {
+                "id": "9383c0da-f413-448c-ab7c-1b7767859ca0",
+                "orderId": "d158b2b4-5b40-4f89-83e4-2cad1cca3964",
+                "periodId": "a38a7173-8711-4edc-be40-eda73e074617",
+                "title": "日常",
+                "progressType": "CHECKBOX",
+                "startValue": "0",
+                "targetValue": "1",
+                "currentValue": "0",
+                "unit": null,
+                "recurrence": "DAILY",
+                "weekdays": null,
+                "everyNDays": null,
+                "sortOrder": 0,
+                "completedAt": null,
+                "completionBatchId": null,
+                "createdAt": 1773108000000,
+                "updatedAt": 1773108000000,
+                "monthDay": null,
+                "monthDays": null,
+                "retiredAt": null,
+                "activeFrom": null,
+                "activeUntil": null,
+                "numericMode": null,
+                "colorArgb": null
+            },
+            {
+                "id": "a375baa0-7ca4-4346-99c0-25e6ab12001c",
+                "orderId": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "periodId": "811a4578-7c11-4dfa-96ef-0817b10e888a",
+                "title": "签到",
+                "progressType": "CHECKBOX",
+                "startValue": "0",
+                "targetValue": "1",
+                "currentValue": "0",
+                "unit": null,
+                "recurrence": "DAILY",
+                "weekdays": null,
+                "everyNDays": null,
+                "sortOrder": 0,
+                "completedAt": null,
+                "completionBatchId": null,
+                "createdAt": 1773108000000,
+                "updatedAt": 1773108000000,
+                "monthDay": null,
+                "monthDays": null,
+                "retiredAt": null,
+                "activeFrom": null,
+                "activeUntil": null,
+                "numericMode": null,
+                "colorArgb": null
+            }
+        ],
+        "task_occurrences": [
+            {
+                "id": "54f6ed23-f5b2-4a26-88ed-1e0d26ebd9c2",
+                "taskDefinitionId": "a375baa0-7ca4-4346-99c0-25e6ab12001c",
+                "occurrenceKey": "N:1",
+                "gameDate": "2026-03-10",
+                "windowStart": "2026-03-10",
+                "windowEnd": "2026-03-10",
+                "completedAt": 1773108000000,
+                "recordedAt": 1773108000000,
+                "backfilled": 0,
+                "completionBatchId": null,
+                "value": null,
+                "createdAt": 1773108000000
+            }
+        ],
+        "task_progress_events": [],
+        "completion_batch_items": [],
+        "attachments": [],
+        "receipts": [
+            {
+                "id": "eff16028-e8a2-4689-b168-a347cdd761f6",
+                "operationId": "3aff4d1d-06bf-494a-9957-74be386d99ed",
+                "orderId": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "periodId": "811a4578-7c11-4dfa-96ef-0817b10e888a",
+                "amountCents": 2000,
+                "receivedAt": 1773108000000,
+                "channel": "WECHAT",
+                "note": null,
+                "status": "ACTIVE",
+                "replacedByReceiptId": null,
+                "createdAt": 1773108000000
+            }
+        ],
+        "receipt_corrections": [],
+        "order_creation_operations": [
+            {
+                "operationId": "7e7219b1-f19f-42e6-b715-4f0c7852af3f",
+                "orderType": "HOSTING",
+                "fingerprint": "8d20fb41dbfee3c010c5cf52bd770e12fff4212806375229ead89ba6cb24b904",
+                "orderId": "d158b2b4-5b40-4f89-83e4-2cad1cca3964",
+                "receiptId": null,
+                "createdAt": 1773108000000
+            },
+            {
+                "operationId": "1e458e7a-33f9-4f1d-b488-6721a5824c6d",
+                "orderType": "HOSTING",
+                "fingerprint": "2bd985af064191e6635515fa242f9abeba4fba23fce4ac49b8d120f0c40ac68c",
+                "orderId": "53b72842-d5e1-454c-9e0d-d6ff92f681a7",
+                "receiptId": null,
+                "createdAt": 1773108000000
+            }
+        ],
+        "reminder_settings": []
+    },
+    "attachmentDigests": []
+}

@@ -44,7 +44,7 @@ class DefaultStatisticsRepository @Inject constructor(
         now: Instant,
     ): Flow<Statistics> {
         val window = ReportingCalendar.window(range, zone, now)
-        return snapshotSource.observe().map { snapshot -> build(snapshot, window) }
+        return snapshotSource.observe().map { snapshot -> build(snapshot, window, now) }
     }
 
     override suspend fun loadStatistics(
@@ -53,16 +53,18 @@ class DefaultStatisticsRepository @Inject constructor(
         now: Instant,
     ): Statistics = observeStatistics(range, zone, now).first()
 
-    private fun build(snapshot: LedgerSnapshot, window: ReportingWindow): Statistics {
+    private fun build(snapshot: LedgerSnapshot, window: ReportingWindow, now: Instant): Statistics {
         val ordersById = snapshot.orders.associateBy { it.id }
         val accountsById = snapshot.accounts.associateBy { it.id }
         val ownersById = snapshot.owners.associateBy { it.id }
         val periodsByOrder = snapshot.periods.groupBy { it.orderId }
         val receiptsByOrder = snapshot.receipts.groupBy { it.orderId }
 
-        // Income honours the selected range; only effective receipts count.
+        // Income honours the selected range; only effective receipts that already arrived
+        // count. Pre-filled future arrival (e.g. marketplace escrow) stays in transit.
         val receiptsInRange = snapshot.receipts.filter { receipt ->
             receipt.status == ReceiptStatus.ACTIVE &&
+                !receipt.receivedAt.isAfter(now) &&
                 within(receipt.receivedAt, window.startInclusive, window.endExclusive)
         }
         val receivedCents = Money.sumCents(receiptsInRange.map { it.amountCents })
@@ -80,7 +82,12 @@ class DefaultStatisticsRepository @Inject constructor(
                 val owner = ownersById[account.ownerId] ?: return@forEach
                 val periods = periodsByOrder[order.id].orEmpty()
                 val receipts = receiptsByOrder[order.id].orEmpty().map { it.toModel() }
-                val balance = Balances.order(order.toModel(), periods.map { it.toModel() }, receipts)
+                val balance = Balances.order(
+                    order = order.toModel(),
+                    periods = periods.map { it.toModel() },
+                    receipts = receipts,
+                    now = now,
+                )
                 balance.receivableItems.forEach { item ->
                     add(
                         outstandingItem(
@@ -113,6 +120,7 @@ class DefaultStatisticsRepository @Inject constructor(
                     snapshot.receipts
                         .filter {
                             it.status == ReceiptStatus.ACTIVE &&
+                                !it.receivedAt.isAfter(now) &&
                                 !it.receivedAt.isBefore(bucket.startInclusive) &&
                                 it.receivedAt.isBefore(bucket.endExclusive)
                         }
@@ -170,6 +178,7 @@ class DefaultStatisticsRepository @Inject constructor(
         paidCents = paidCents,
         outstandingCents = outstandingCents,
         sortDate = periodStart ?: order.createdAt.atZone(zone).toLocalDate(),
+        countBased = order.hostingMode == com.daigan.record.data.model.HostingMode.COUNT_BASED,
     )
 
     private fun within(instant: Instant, start: Instant?, end: Instant?): Boolean {

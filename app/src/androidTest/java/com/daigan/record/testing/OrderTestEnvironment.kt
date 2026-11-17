@@ -22,7 +22,9 @@ import com.daigan.record.data.model.RecurrenceType
 import com.daigan.record.data.model.ShortOrderDraft
 import com.daigan.record.data.model.TaskDraft
 import com.daigan.record.data.repository.AttachmentSync
+import com.daigan.record.data.repository.CountSessionService
 import com.daigan.record.data.repository.DefaultAttachmentRepository
+import com.daigan.record.data.repository.DefaultCountSessionService
 import com.daigan.record.data.repository.DefaultGameAccountRepository
 import com.daigan.record.data.repository.DefaultGameTemplateRepository
 import com.daigan.record.data.repository.DefaultOrderRepository
@@ -208,6 +210,7 @@ class OrderTestEnvironment(
     val ownerRepository: DefaultOwnerRepository
     val accountRepository: DefaultGameAccountRepository
     val orderRepository: DefaultOrderRepository
+    val countSessionService: CountSessionService
     val attachmentRepository: DefaultAttachmentRepository
     val receiptLedger: ReceiptLedger
     val receiptRepository: DefaultReceiptRepository
@@ -235,16 +238,48 @@ class OrderTestEnvironment(
             orderDao = database.orderDao(),
             timeProvider = clock,
         )
+        // Created before the account repository because deletions ask it to remove the
+        // attachment files whose rows were committed away.
+        attachmentRepository = DefaultAttachmentRepository(
+            context = context,
+            database = database,
+            attachmentDao = database.attachmentDao(),
+            taskDao = database.taskDao(),
+            occurrenceDao = database.occurrenceDao(),
+            orderDao = database.orderDao(),
+            accountDao = database.gameAccountDao(),
+            ownerDao = database.ownerDao(),
+            timeProvider = clock,
+            sync = attachmentSync,
+        )
         accountRepository = DefaultGameAccountRepository(
             database = database,
             ownerDao = database.ownerDao(),
             accountDao = database.gameAccountDao(),
             orderDao = database.orderDao(),
+            taskDao = database.taskDao(),
+            occurrenceDao = database.occurrenceDao(),
+            receiptDao = database.receiptDao(),
+            attachmentDao = database.attachmentDao(),
+            completionBatchDao = database.completionBatchDao(),
+            categoryDao = database.accountCategoryDao(),
             timeProvider = clock,
+            attachmentCleanup = attachmentRepository,
         )
         receiptLedger = ReceiptLedger(
             receiptDao = database.receiptDao(),
             orderDao = database.orderDao(),
+            timeProvider = clock,
+        )
+        countSessionService = DefaultCountSessionService(
+            db = database,
+            orderDao = database.orderDao(),
+            taskDao = database.taskDao(),
+            occurrenceDao = database.occurrenceDao(),
+            eventDao = database.taskProgressEventDao(),
+            sessionDao = database.hostingSessionDao(),
+            accountDao = database.gameAccountDao(),
+            ownerDao = database.ownerDao(),
             timeProvider = clock,
         )
         orderRepository = DefaultOrderRepository(
@@ -259,6 +294,9 @@ class OrderTestEnvironment(
             receiptDao = database.receiptDao(),
             receiptLedger = receiptLedger,
             creationOperationDao = database.creationOperationDao(),
+            hostingSessionDao = database.hostingSessionDao(),
+            eventDao = database.taskProgressEventDao(),
+            countSessions = countSessionService,
             ticker = ticker,
         )
         ledgerSnapshotSource = LedgerSnapshotSource(
@@ -274,18 +312,6 @@ class OrderTestEnvironment(
             snapshotSource = ledgerSnapshotSource,
         )
         statisticsRepository = DefaultStatisticsRepository(ledgerSnapshotSource)
-        attachmentRepository = DefaultAttachmentRepository(
-            context = context,
-            database = database,
-            attachmentDao = database.attachmentDao(),
-            taskDao = database.taskDao(),
-            occurrenceDao = database.occurrenceDao(),
-            orderDao = database.orderDao(),
-            accountDao = database.gameAccountDao(),
-            ownerDao = database.ownerDao(),
-            timeProvider = clock,
-            sync = attachmentSync,
-        )
         templateRepository = DefaultGameTemplateRepository(
             database = database,
             templateDao = database.templateDao(),

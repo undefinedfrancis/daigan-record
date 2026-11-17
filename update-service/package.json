@@ -1,0 +1,16 @@
+{
+  "name": "daigan-update-service",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/",
+    "publish:stage": "node tools/publish-release.mjs --stage-only",
+    "publish:release": "node tools/publish-release.mjs",
+    "vercel-build": "node tools/prepare-release.mjs",
+    "release:pgyer": "node tools/release-pgyer.mjs"
+  }
+}

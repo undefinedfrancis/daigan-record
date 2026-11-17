@@ -6,14 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.daigan.record.data.model.TemplateCategoryDraft
 import com.daigan.record.data.model.TemplateDraft
 import com.daigan.record.data.model.TemplateOrigin
+import com.daigan.record.data.model.TemplatePricePresetDraft
 import com.daigan.record.data.model.TemplateTaskDraft
 import com.daigan.record.data.repository.GameTemplateRepository
+import com.daigan.record.data.repository.ServerOptionRepository
 import com.daigan.record.ui.navigation.Routes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -28,14 +34,23 @@ data class TemplateEditorUiState(
     val saving: Boolean = false,
     val dirty: Boolean = false,
     val completed: Boolean = false,
+    /**
+     * 区服 presets of the game currently typed in the editor. They are the same
+     * per-game list the account form reads; editing them here never rewrites the server
+     * string already saved on an account.
+     */
+    val serverOptions: List<String> = emptyList(),
+    val serverError: String? = null,
 ) {
     val errorMessages: List<String> get() = errors.values.distinct()
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class TemplateEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val templateRepository: GameTemplateRepository,
+    private val serverOptionRepository: ServerOptionRepository,
 ) : ViewModel() {
 
     private val templateId: String? = savedStateHandle
@@ -51,6 +66,17 @@ class TemplateEditorViewModel @Inject constructor(
     val uiState: StateFlow<TemplateEditorUiState> = _uiState.asStateFlow()
 
     init {
+        // UF-032: manage the selected game's server presets inside the template editor,
+        // reusing the existing per-game store instead of a second option list.
+        viewModelScope.launch {
+            uiState
+                .map { it.draft.gameName.trim() }
+                .distinctUntilChanged()
+                .flatMapLatest { name ->
+                    if (name.isBlank()) flowOf(emptyList()) else serverOptionRepository.observeForGame(name)
+                }
+                .collect { options -> _uiState.update { it.copy(serverOptions = options) } }
+        }
         viewModelScope.launch {
             if (templateId == null) {
                 _uiState.update { it.copy(loading = false) }
@@ -123,6 +149,71 @@ class TemplateEditorViewModel @Inject constructor(
                 if (i == taskIndex) transform(task) else task
             },
         )
+    }
+
+    fun addPricePreset() = updateDraft { draft ->
+        if (draft.pricePresets.size >= TemplateDraft.MAX_PRICE_PRESETS) {
+            draft
+        } else {
+            draft.copy(pricePresets = draft.pricePresets + TemplatePricePresetDraft())
+        }
+    }
+
+    fun removePricePreset(index: Int) = updateDraft { draft ->
+        if (index !in draft.pricePresets.indices) {
+            draft
+        } else {
+            draft.copy(pricePresets = draft.pricePresets.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    fun updatePricePreset(
+        index: Int,
+        transform: (TemplatePricePresetDraft) -> TemplatePricePresetDraft,
+    ) = updateDraft { draft ->
+        draft.copy(
+            pricePresets = draft.pricePresets.mapIndexed { i, preset ->
+                if (i == index) transform(preset) else preset
+            },
+        )
+    }
+
+    fun addServerOption(name: String) = writeServerOptions { game, options ->
+        serverOptionRepository.setOptions(game, options + name.trim())
+    }
+
+    fun renameServerOption(oldName: String, newName: String) = writeServerOptions { game, _ ->
+        serverOptionRepository.renameOption(game, oldName, newName)
+    }
+
+    fun removeServerOption(name: String) = writeServerOptions { game, _ ->
+        serverOptionRepository.removeOption(game, name)
+    }
+
+    /**
+     * Writes go through the shared per-game store; the current list is passed in so a
+     * newly typed name is appended exactly once. Accounts keep their own saved server
+     * value and are never rewritten by these edits.
+     */
+    private fun writeServerOptions(
+        block: suspend (game: String, options: List<String>) -> Unit,
+    ) {
+        val state = _uiState.value
+        val game = state.draft.gameName.trim()
+        if (game.isEmpty()) {
+            _uiState.update { it.copy(serverError = "请先填写游戏名称") }
+            return
+        }
+        val options = state.serverOptions
+        viewModelScope.launch {
+            runCatching { block(game, options) }
+                .onSuccess { _uiState.update { it.copy(serverError = null) } }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(serverError = error.message ?: "区服预设保存失败，请重试")
+                    }
+                }
+        }
     }
 
     fun save() {

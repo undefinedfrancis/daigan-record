@@ -10,6 +10,7 @@ import com.daigan.record.testing.FakeOwnerRepository
 import com.daigan.record.testing.MainDispatcherRule
 import com.daigan.record.testing.account
 import com.daigan.record.testing.owner
+import com.daigan.record.testing.InMemoryUiPreferenceStore
 import com.daigan.record.ui.navigation.Routes
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -26,8 +27,9 @@ class AccountFormViewModelTest {
 
     private val ownerRepository = FakeOwnerRepository()
     private val accountRepository = FakeGameAccountRepository()
+    private val preferences = InMemoryUiPreferenceStore()
 
-    private fun viewModel(accountId: String? = null): AccountFormViewModel {
+    private fun viewModel(accountId: String? = null, settings: com.daigan.record.data.local.dao.AppSettingsDao? = null): AccountFormViewModel {
         ownerRepository.ownersById["owner-1"] = owner(number = 1, nickname = "小满")
         return AccountFormViewModel(
             savedStateHandle = SavedStateHandle(
@@ -40,6 +42,9 @@ class AccountFormViewModelTest {
             accountRepository = accountRepository,
             templateRepository = FakeGameTemplateRepository(),
             serverOptionRepository = com.daigan.record.testing.FakeServerOptionRepository(),
+            categoryRepository = com.daigan.record.testing.FakeAccountCategoryRepository(),
+            uiPreferenceStore = preferences,
+            appSettingsDao = settings,
         )
     }
 
@@ -49,6 +54,89 @@ class AccountFormViewModelTest {
 
         assertEquals("小满", viewModel.uiState.value.ownerNickname)
         assertEquals(LoginMethod.VERIFICATION_CODE, viewModel.uiState.value.draft.loginMethod)
+    }
+
+    @Test
+    fun `new and edit drafts remain isolated and require explicit restoration`() = runTest {
+        accountRepository.accountsById["account-1"] = account()
+        val newForm = viewModel()
+        newForm.onDraftChange { it.copy(gameName = "新建草稿") }
+        val editForm = viewModel("account-1")
+        editForm.onDraftChange { it.copy(server = "编辑草稿") }
+        val reopenedNew = viewModel()
+        assertEquals("", reopenedNew.uiState.value.draft.gameName)
+        assertTrue(reopenedNew.pendingDraft.value != null)
+        reopenedNew.restoreDraft()
+        assertEquals("新建草稿", reopenedNew.uiState.value.draft.gameName)
+        val reopenedEdit = viewModel("account-1")
+        assertEquals("重返未来：1999", reopenedEdit.uiState.value.draft.gameName)
+        reopenedEdit.restoreDraft()
+        assertEquals("编辑草稿", reopenedEdit.uiState.value.draft.server)
+        reopenedEdit.discardDraft()
+        assertEquals("新建草稿", viewModel().pendingDraft.value?.gameName)
+        assertNull(viewModel("account-1").pendingDraft.value)
+    }
+
+    @Test
+    fun `saving edit clears only its draft and preserves unfinished creation`() = runTest {
+        accountRepository.accountsById["account-1"] = account()
+        viewModel().onDraftChange { it.copy(gameName = "保留新建") }
+        val edit = viewModel("account-1")
+        edit.onDraftChange { it.copy(server = "渠道服") }
+        edit.save()
+        assertTrue(edit.uiState.value.completed)
+        assertNull(viewModel("account-1").pendingDraft.value)
+        assertEquals("保留新建", viewModel().pendingDraft.value?.gameName)
+    }
+
+    @Test
+    fun `failed edit preserves input and persisted draft`() = runTest {
+        accountRepository.accountsById["account-1"] = account()
+        val edit = viewModel("account-1")
+        edit.onDraftChange { it.copy(server = "失败后保留") }
+        accountRepository.accountsById.remove("account-1")
+        edit.save()
+        assertFalse(edit.uiState.value.completed)
+        assertEquals("失败后保留", edit.uiState.value.draft.server)
+        assertTrue(edit.uiState.value.saveError != null)
+        accountRepository.accountsById["account-1"] = account()
+        assertEquals("失败后保留", viewModel("account-1").pendingDraft.value?.server)
+    }
+
+    @Test
+    fun `form refuses account from another owner`() = runTest {
+        accountRepository.accountsById["account-1"] = account().copy(ownerId = "other-owner")
+        val edit = viewModel("account-1")
+        assertTrue(edit.uiState.value.saveError != null)
+        edit.onDraftChange { it.copy(server = "不能误改") }
+        edit.save()
+        assertTrue(accountRepository.updatedDrafts.isEmpty())
+    }
+
+    @Test
+    fun `dataset replacement isolates pending drafts and rejects old open form`() = runTest {
+        val settings = DraftSettings()
+        val form = viewModel(settings = settings)
+        form.onDraftChange { it.copy(gameName = "旧资料草稿", server = "国服", uid = "123", loginAccount = "账号") }
+        settings.identity.value = "replacement"
+        form.save()
+        assertFalse(form.uiState.value.completed)
+        assertTrue(form.uiState.value.saveError != null)
+        assertTrue(accountRepository.createdDrafts.isEmpty())
+        assertNull(viewModel(settings = settings).pendingDraft.value)
+        settings.identity.value = "original"
+        assertEquals("旧资料草稿", viewModel(settings = settings).pendingDraft.value?.gameName)
+    }
+
+    private class DraftSettings : com.daigan.record.data.local.dao.AppSettingsDao {
+        val identity = kotlinx.coroutines.flow.MutableStateFlow<String?>("original")
+        override suspend fun datasetInstanceId() = identity.value
+        override fun observeDatasetInstanceId(): kotlinx.coroutines.flow.Flow<String?> = identity
+        override suspend fun find(): com.daigan.record.data.local.entity.AppSettingsEntity? = null
+        override suspend fun lastRestoreId(): String? = null
+        override suspend fun upsert(entity: com.daigan.record.data.local.entity.AppSettingsEntity) { identity.value = entity.datasetInstanceId }
+        override suspend fun setLastRestoreId(restoreId: String?) = Unit
+        override suspend fun deleteAll() { identity.value = null }
     }
 
     @Test
@@ -159,6 +247,8 @@ class AccountFormViewModelTest {
             accountRepository = accountRepository,
             templateRepository = FakeGameTemplateRepository(),
             serverOptionRepository = com.daigan.record.testing.FakeServerOptionRepository(),
+            categoryRepository = com.daigan.record.testing.FakeAccountCategoryRepository(),
+            uiPreferenceStore = preferences,
         )
         viewModel.onDraftChange {
             it.copy(gameName = "鸣潮", server = "国服", uid = "10002136", loginAccount = "demo")

@@ -47,6 +47,11 @@ class ReceiptLedger @Inject constructor(
     private val timeProvider: TimeProvider,
 ) {
 
+    private companion object {
+        /** 未来到账时间最多预填一年，避免误输入把在途款推到很远的月份。 */
+        const val MAX_RECEIPT_PREFILL_SECONDS = 365L * 24 * 60 * 60
+    }
+
     suspend fun record(request: PaymentRequest): PaymentResult = record(request, timeProvider.now())
 
     suspend fun record(request: PaymentRequest, now: Instant): PaymentResult {
@@ -58,7 +63,11 @@ class ReceiptLedger @Inject constructor(
         require(request.operationId.isNotBlank()) { "操作标识不能为空" }
         require(command.amountCents > 0) { "收款金额必须大于 0" }
         require(command.amountCents <= Money.MAX_CENTS) { "金额过大" }
-        require(!command.receivedAt.isAfter(recordedAt)) { "收款时间不能晚于当前时间" }
+        // 到账时间允许在未来（闲鱼等担保交易要等确认收货才到账），但在到达前
+        // 只算在途，不计实收、不冲抵待收（见 Balances.order 的 now 口径）。
+        require(!command.receivedAt.isAfter(recordedAt.plusSeconds(MAX_RECEIPT_PREFILL_SECONDS))) {
+            "到账时间最多只能预填一年以内"
+        }
 
         // Idempotency comes before the balance check: a retry of a successful payment
         // must return the original receipt even though the item is now fully settled.
@@ -201,28 +210,20 @@ class ReceiptLedger @Inject constructor(
         val channel = requireNotNull(command.channel) { "缺少更正后的收款渠道" }
         require(amountCents > 0) { "更正后的金额必须大于 0" }
         require(amountCents <= Money.MAX_CENTS) { "金额过大" }
-        require(!receivedAt.isAfter(recordedAt)) { "收款时间不能晚于当前时间" }
+        require(!receivedAt.isAfter(recordedAt.plusSeconds(MAX_RECEIPT_PREFILL_SECONDS))) {
+            "到账时间最多只能预填一年以内"
+        }
 
         val order = orderDao.findById(original.orderId)
             ?: throw IllegalArgumentException("订单不存在")
-        val priceCents = when (order.type) {
-            OrderType.SHORT_TASK -> order.priceCents ?: 0L
-            OrderType.HOSTING -> {
-                val periodId = original.periodId
-                    ?: throw IllegalStateException("托管收款缺少期次，无法更正")
-                orderDao.findPeriod(periodId)?.priceCents
-                    ?: throw IllegalArgumentException("托管期次不存在")
-            }
+        if (order.type == OrderType.HOSTING) {
+            val periodId = original.periodId
+                ?: throw IllegalStateException("托管收款缺少期次，无法更正")
+            require(orderDao.findPeriod(periodId) != null) { "托管期次不存在" }
         }
-        val otherPaid = effectivePaidCents(
-            orderId = original.orderId,
-            periodId = original.periodId,
-            excludingReceiptId = original.id,
-        )
-        val remaining = Money.remainingCents(priceCents, otherPaid)
-        require(amountCents <= remaining) {
-            "更正后的金额超过该款项可收余额 ${Money.formatCents(remaining)}"
-        }
+        // A correction edits the historical movement itself. It is intentionally not
+        // constrained by the order's current outstanding balance: correcting a typo
+        // may legitimately reveal an overpayment, which remains visible in balances.
 
         val replacement = ReceiptEntity(
             id = UUID.randomUUID().toString(),

@@ -23,12 +23,25 @@ class BackupDataSet(val tables: List<TableRows>) {
         val table: BackupTableCatalog.Table,
         /** One value per catalog column: a JSON primitive, or null for SQL NULL. */
         val rows: List<List<JsonElement?>>,
+        /**
+         * The column list the source file actually declared, or null when the table was
+         * absent from it.
+         *
+         * Kept because the decoder fills missing optional columns with NULL: without this,
+         * "column did not exist yet" and "stored NULL" are indistinguishable, and the
+         * level-specific service-default migration could not be applied honestly.
+         */
+        val presentColumns: List<String>? = null,
     ) {
         val rowCount: Int get() = rows.size
+
+        fun hadColumn(name: String): Boolean = presentColumns?.contains(name) ?: false
     }
 
     fun rows(tableName: String): List<List<JsonElement?>> =
         tables.firstOrNull { it.table.name == tableName }?.rows ?: emptyList()
+
+    fun tableRows(tableName: String): TableRows? = tables.firstOrNull { it.table.name == tableName }
 
     fun count(tableName: String): Int = rows(tableName).size
 
@@ -86,16 +99,19 @@ object BackupDataCodec {
 
     fun encode(dataSet: BackupDataSet): String {
         val tables = JsonArray(
-            dataSet.tables.map { tableRows ->
+            dataSet.tables.filter { it.table.included }.map { tableRows ->
+                val table = tableRows.table
+                // A new export always writes the complete portable schema, without any
+                // retired legacy-extension column.
+                val written = table.writtenColumnNames
+                val indexes = written.map { table.columnNames.indexOf(it) }
                 JsonObject(
                     linkedMapOf(
-                        "name" to JsonPrimitive(tableRows.table.name),
-                        "columns" to JsonArray(
-                            tableRows.table.columnNames.map { JsonPrimitive(it) },
-                        ),
+                        "name" to JsonPrimitive(table.name),
+                        "columns" to JsonArray(written.map { JsonPrimitive(it) }),
                         "rows" to JsonArray(
                             tableRows.rows.map { row ->
-                                JsonArray(row.map { it ?: JsonNull })
+                                JsonArray(indexes.map { position -> row.getOrNull(position) ?: JsonNull })
                             },
                         ),
                     ),
@@ -106,13 +122,21 @@ object BackupDataCodec {
             linkedMapOf(
                 "format" to JsonPrimitive(BackupDataSet.DATA_FORMAT),
                 "formatVersion" to JsonPrimitive(BackupDataSet.DATA_FORMAT_VERSION),
+                "schemaVersion" to JsonPrimitive(BackupTableCatalog.PORTABLE_SCHEMA_VERSION),
                 "tables" to tables,
             ),
         )
         return json.encodeToString(JsonElementAlias.serializer(), root)
     }
 
-    fun decode(text: String): BackupDataSet {
+    /**
+     * Decodes `data.json`.
+     *
+     * [schemaVersion] is the portable schema declared by the manifest; it decides whether
+     * retired legacy columns are still readable and whether missing optional columns may
+     * be filled with NULL.
+     */
+    fun decode(text: String, schemaVersion: Int = BackupTableCatalog.PORTABLE_SCHEMA_VERSION): BackupDataSet {
         JsonSafety.requireBoundedDepth(text, BackupDataSet.MAX_JSON_DEPTH)
         val root = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull()
             ?: throw BackupException("备份的数据内容已损坏，无法恢复。")
@@ -122,6 +146,13 @@ object BackupDataCodec {
         val formatVersion = root.int("formatVersion")
         if (formatVersion != BackupDataSet.DATA_FORMAT_VERSION) {
             throw BackupException("备份的数据格式版本（$formatVersion）不受支持，无法恢复。")
+        }
+        val declaredSchema = root["schemaVersion"]
+        if (declaredSchema != null) {
+            val declared = (declaredSchema as? JsonPrimitive)?.content?.toIntOrNull()
+            if (declared != schemaVersion) {
+                throw BackupException("数据文件声明的版本与清单不一致，无法恢复。")
+            }
         }
         val tableArray = root["tables"] as? JsonArray
             ?: throw BackupException("备份缺少数据表清单，无法恢复。")
@@ -141,15 +172,36 @@ object BackupDataCodec {
             val columnsElement = tableObject["columns"] as? JsonArray
                 ?: throw BackupException("备份的数据表「$name」缺少列说明，无法恢复。")
             val columns = columnsElement.map { (it as? JsonPrimitive)?.content }
-            val addedColumn = when (name) {
-                "orders" -> "cancelledAt"
-                "task_definitions", "template_tasks" -> "monthDay"
-                "game_accounts" -> "loginDevice"
-                else -> null
+            // 退役列只在读取更老的便携版本时可接受。
+            val retired = columns.filter { column ->
+                column != null && spec.column(column)?.legacyOnly == true
             }
-            val legacyColumns = addedColumn != null && columns == spec.columnNames.filter { it != addedColumn }
-            if (columns != spec.columnNames && !legacyColumns) {
+            if (retired.isNotEmpty() && schemaVersion >= BackupTableCatalog.PORTABLE_SCHEMA_VERSION) {
+                throw BackupException(
+                    "备份的数据表「$name」包含 schema " +
+                        "${BackupTableCatalog.PORTABLE_SCHEMA_VERSION} 已退役的列，无法恢复。",
+                )
+            }
+            // A backup written before a nullable column existed may omit it; the value is
+            // restored as NULL and filled by the deterministic normalizer. Unknown columns,
+            // missing required columns and reordered columns are still rejected.
+            val optionalColumns = if (schemaVersion < BackupTableCatalog.PORTABLE_SCHEMA_VERSION) {
+                BackupTableCatalog.legacyOptionalColumns[name].orEmpty()
+            } else {
+                emptySet()
+            }
+            val knownColumns = spec.columnNames.toSet()
+            val unknownColumns = columns.filter { it == null || it !in knownColumns }
+            val missingColumns = spec.writtenColumnNames.filter { it !in columns }
+            val orderPreserved = columns == spec.columnNames.filter { it in columns }
+            if (unknownColumns.isNotEmpty() ||
+                missingColumns.any { it !in optionalColumns } ||
+                !orderPreserved
+            ) {
                 throw BackupException("备份的数据表「$name」列不符合当前版本，无法恢复。")
+            }
+            if (columns.filterNotNull().toSet().size != columns.size) {
+                throw BackupException("备份的数据表「$name」列清单重复，无法恢复。")
             }
             val rowsElement = tableObject["rows"] as? JsonArray
                 ?: throw BackupException("备份的数据表「$name」缺少记录，无法恢复。")
@@ -171,7 +223,11 @@ object BackupDataCodec {
                 }
                 row
             }
-            byName[name] = BackupDataSet.TableRows(spec, rows)
+            byName[name] = BackupDataSet.TableRows(
+                table = spec,
+                rows = rows,
+                presentColumns = columns.filterNotNull(),
+            )
         }
         val missing = expected.filter { it.name !in byName }
         val requiredMissing = missing.filter { it.name !in BackupTableCatalog.legacyOptionalTables }
@@ -181,7 +237,11 @@ object BackupDataCodec {
             )
         }
         // Tables added after the backup's generation default to empty rows.
-        return BackupDataSet(expected.map { byName[it.name] ?: BackupDataSet.TableRows(it, emptyList()) })
+        return BackupDataSet(
+            expected.map { table ->
+                byName[table.name] ?: BackupDataSet.TableRows(table, emptyList(), presentColumns = null)
+            },
+        )
     }
 
     private fun decodeValue(
@@ -189,7 +249,16 @@ object BackupDataCodec {
         value: JsonElement,
         table: String,
     ): JsonElement? {
-        if (value is JsonNull) return null
+        if (value is JsonNull) {
+            // 显式 null 落在非空列上就是对象级错误：绝不臆造金额、时间或渠道。
+            // "历史缺列"走的是另一条路径（根本不调用本函数），因此不会误判。
+            if (!column.nullable) {
+                throw BackupException(
+                    "备份的数据表「$table」的「${column.name}」不允许为空，无法恢复。",
+                )
+            }
+            return null
+        }
         val primitive = value as? JsonPrimitive
             ?: throw BackupException("备份的数据表「$table」包含无效值，无法恢复。")
         return when (column.type) {
@@ -207,23 +276,56 @@ object BackupDataCodec {
                 val raw = primitive.content
                 val booleanColumn = (table == "reminder_settings" && column.name.endsWith("Enabled")) ||
                     (table == "task_occurrences" && column.name == "backfilled") ||
-                    (table == "completion_batch_items" && column.name in setOf("previousBackfilled", "appliedBackfilled"))
+                    (table == "completion_batch_items" &&
+                        column.name in setOf("previousBackfilled", "appliedBackfilled"))
                 if (booleanColumn && raw !in setOf("0", "1")) {
                     throw BackupException("备份中的开关字段无效，无法恢复。")
                 }
-                val intColumn = column.name in setOf("number", "nextNumber", "periodIndex",
-                    "dailyRefreshMinutes", "weeklyRefreshDay", "weeklyRefreshMinutes", "sortOrder",
-                    "everyNDays", "monthDay", "shortDeadlineMinutes", "hostingExpiryMinutes", "unfinishedTasksMinutes")
-                if (intColumn && raw.toIntOrNull() == null) {
-                    throw BackupException("备份中的整数字段超出支持范围，无法恢复。")
-                }
                 if (raw.toLongOrNull() == null) {
                     throw BackupException("备份的数据表「$table」数字字段超出范围，无法恢复。")
+                }
+                // Room reads some columns into an Int property; a value that only fits in a
+                // Long would silently truncate there, so it is rejected up front.
+                if (column.name in INT_COLUMNS && raw.toIntOrNull() == null) {
+                    throw BackupException("备份中的整数字段超出支持范围，无法恢复。")
                 }
                 primitive
             }
         }
     }
+
+    /**
+     * Columns whose Room property is an `Int` (indices, minute-of-day, small counters,
+     * packed colours). Kept explicit so a wide value cannot silently truncate on write.
+     */
+    private val INT_COLUMNS = setOf(
+        "id",
+        "number",
+        "nextNumber",
+        "sortOrder",
+        "dailyRefreshMinutes",
+        "weeklyRefreshDay",
+        "weeklyRefreshMinutes",
+        "everyNDays",
+        "monthDay",
+        "serviceDays",
+        "serviceCount",
+        "targetSessions",
+        "sessionIndex",
+        "sequence",
+        "shortDeadlineEnabled",
+        "shortDeadlineMinutes",
+        "hostingExpiryEnabled",
+        "hostingExpiryMinutes",
+        "unfinishedTasksEnabled",
+        "unfinishedTasksMinutes",
+        "orderColor",
+        "colorArgb",
+        "periodIndex",
+        "backfilled",
+        "previousBackfilled",
+        "appliedBackfilled",
+    )
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content

@@ -82,7 +82,11 @@ class ReminderRepository @Inject constructor(
 
     suspend fun <T> withCurrentState(block: suspend () -> T): T = database.withTransaction { block() }
 
-    suspend fun loadSnapshot(): ReminderSnapshot = database.withTransaction {
+    /**
+     * [now] decides which hosting period each order is about: after an early renewal the
+     * newest period is a future one and must not own today's reminder.
+     */
+    suspend fun loadSnapshot(now: Instant): ReminderSnapshot = database.withTransaction {
         ReminderSnapshotBuilder.build(
             orders = orderDao.findAllOrders(),
             accounts = accountDao.findAll(),
@@ -90,6 +94,7 @@ class ReminderRepository @Inject constructor(
             periods = orderDao.findAllPeriods(),
             tasks = orderDao.findAllTasks(),
             occurrences = orderDao.findAllOccurrences(),
+            now = now,
         )
     }
 

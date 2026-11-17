@@ -326,7 +326,7 @@ class Phase3FinancialContractTest {
     }
 
     @Test
-    fun amendmentCannotExceedTheRecoverableBalance() = runBlocking {
+    fun amendmentCanDirectlyChangeAmountBeyondRecoverableBalance() = runBlocking {
         val (owner, account) = env.seedOwnerAndAccount()
         val orderId = env.orderRepository.createShortOrder(
             shortDraft(owner.id, account.id, priceYuan = "100.00")
@@ -344,9 +344,10 @@ class Phase3FinancialContractTest {
             note = null,
             reason = null,
         )
-        assertTrue(runCatching { env.receiptRepository.correctReceipt(tooLarge) }.isFailure)
+        val amended = env.receiptRepository.correctReceipt(tooLarge)
+        assertEquals(7_000L, amended.receipt!!.amountCents)
         assertEquals(
-            8_000L,
+            11_000L,
             env.orderRepository.observeOrderDetail(orderId).first()!!.balance().totalPaidCents,
         )
     }

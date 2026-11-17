@@ -3,6 +3,7 @@ package com.daigan.record.data.local
 import com.daigan.record.core.time.GameRefreshRules
 import com.daigan.record.data.local.entity.AttachmentEntity
 import com.daigan.record.data.local.entity.HostingPeriodEntity
+import com.daigan.record.data.local.entity.HostingSessionEntity
 import com.daigan.record.data.local.entity.OrderEntity
 import com.daigan.record.data.local.entity.ReceiptCorrectionEntity
 import com.daigan.record.data.local.entity.ReceiptEntity
@@ -11,6 +12,7 @@ import com.daigan.record.data.local.entity.TaskOccurrenceEntity
 import com.daigan.record.data.model.Attachment
 import com.daigan.record.data.model.GameRefreshRulesDomain
 import com.daigan.record.data.model.HostingPeriod
+import com.daigan.record.data.model.HostingSession
 import com.daigan.record.data.model.Order
 import com.daigan.record.data.model.OrderTask
 import com.daigan.record.data.model.Receipt
@@ -43,6 +45,7 @@ fun GameRefreshRulesDomain.toCore(): GameRefreshRules = GameRefreshRules(
     dailyRefresh = dailyRefresh,
     weeklyRefreshDay = weeklyRefreshDay,
     weeklyRefreshTime = weeklyRefreshTime,
+    monthlyRefreshDays = monthlyRefreshDays,
 )
 
 fun GameRefreshRulesDomain.zone(): ZoneId = zoneId
@@ -63,6 +66,7 @@ fun OrderEntity.toModel(): Order = Order(
         dailyRefresh = LocalTime.of(dailyRefreshMinutes / 60, dailyRefreshMinutes % 60),
         weeklyRefreshDay = DayOfWeek.of(weeklyRefreshDay.coerceIn(1, 7)),
         weeklyRefreshTime = LocalTime.of(weeklyRefreshMinutes / 60, weeklyRefreshMinutes % 60),
+        monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(monthlyRefreshDays) ?: emptySet(),
     ),
     createdAt = createdAt,
     completedAt = completedAt,
@@ -70,6 +74,23 @@ fun OrderEntity.toModel(): Order = Order(
     sourceTemplateName = sourceTemplateName,
     sourceTemplateVersion = sourceTemplateVersion,
     cancelledAt = cancelledAt,
+    archivedAt = archivedAt,
+    // NULL is a row written before schema 13; it is date-based, not a new mode.
+    hostingMode = hostingMode ?: com.daigan.record.data.model.HostingMode.DATE_RANGE,
+    targetSessions = targetSessions,
+    colorArgb = orderColor,
+    monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(monthlyRefreshDays)
+        ?: emptySet(),
+)
+
+fun HostingSessionEntity.toModel(): HostingSession = HostingSession(
+    id = id,
+    orderId = orderId,
+    sessionIndex = sessionIndex,
+    createdAt = createdAt,
+    completedAt = completedAt,
+    completionBatchId = completionBatchId,
+    periodId = periodId,
 )
 
 fun HostingPeriodEntity.toModel(): HostingPeriod = HostingPeriod(
@@ -84,9 +105,15 @@ fun HostingPeriodEntity.toModel(): HostingPeriod = HostingPeriod(
         dailyRefresh = LocalTime.of(dailyRefreshMinutes / 60, dailyRefreshMinutes % 60),
         weeklyRefreshDay = DayOfWeek.of(weeklyRefreshDay.coerceIn(1, 7)),
         weeklyRefreshTime = LocalTime.of(weeklyRefreshMinutes / 60, weeklyRefreshMinutes % 60),
+        monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(monthlyRefreshDays)
+            ?: emptySet(),
     ),
     createdAt = createdAt,
     renewalOperationId = renewalOperationId,
+    serviceDays = serviceDays,
+    serviceWeekdays = parseWeekdays(serviceWeekdays),
+    serviceCount = serviceCount,
+    monthlyRefreshDays = com.daigan.record.data.model.parseMonthlyDates(monthlyRefreshDays) ?: emptySet(),
 )
 
 fun TaskDefinitionEntity.toModel(): OrderTask = OrderTask(
@@ -103,6 +130,12 @@ fun TaskDefinitionEntity.toModel(): OrderTask = OrderTask(
     weekdays = parseWeekdays(weekdays),
     everyNDays = everyNDays,
     monthDay = monthDay,
+    monthDays = com.daigan.record.data.model.parseMonthlyDates(monthDays) ?: setOfNotNull(monthDay),
+    retiredAt = retiredAt,
+    activeFrom = activeFrom,
+    activeUntil = activeUntil,
+    numericMode = numericMode,
+    colorArgb = colorArgb,
     sortOrder = sortOrder,
     completedAt = completedAt,
 )

@@ -32,8 +32,9 @@ android {
         applicationId = "com.daigan.record"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 14
+        versionName = "1.8.5"
+        buildConfigField("String", "UPDATE_SERVICE_URL", "\"${project.findProperty("updateServiceUrl") ?: "https://update.undefinedyou.com"}\"")
 
         testInstrumentationRunner = "com.daigan.record.HiltTestRunner"
         vectorDrawables {
@@ -48,6 +49,12 @@ android {
 
     buildTypes {
         getByName("release") {
+            isDebuggable = false
+            // Explicit local candidate opt-in preserves upgrade continuity with existing installs.
+            // Production builds must supply their intended signing configuration separately.
+            if (providers.gradleProperty("legacyCandidateSigning").orNull == "true") {
+                signingConfig = signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -65,7 +72,7 @@ android {
     buildFeatures {
         compose = true
         aidl = false
-        buildConfig = false
+        buildConfig = true
         renderScript = false
         shaders = false
     }

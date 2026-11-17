@@ -1,5 +1,7 @@
 package com.daigan.record.feature.orders
 
+import com.daigan.record.data.local.toCore
+
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -95,7 +97,7 @@ class BackfillViewModel @Inject constructor(
                     // Selection can never move past the current game date or before
                     // the period start; not-yet-started periods stay read-only.
                     val first = period.startDate
-                    val last = minOf(period.endDate, detail.today)
+                    val last = minOf(period.endDate, com.daigan.record.core.time.GameCalendar.gameDate(detail.now, period.refresh.toCore()))
                     val date = if (!initialisedDate) {
                         initialisedDate = true
                         maxOf(first, minOf(detail.today.minusDays(1), last))
@@ -110,9 +112,10 @@ class BackfillViewModel @Inject constructor(
     fun selectDate(date: LocalDate) {
         val detail = _uiState.value.detail ?: return
         val period = detail.periods.firstOrNull { it.id == periodId } ?: return
-        if (detail.today.isBefore(period.startDate)) return
+        if (com.daigan.record.core.time.GameCalendar.gameDate(detail.now, period.refresh.toCore()).isBefore(period.startDate)) return
         val first = period.startDate
-        val last = maxOf(first, minOf(period.endDate, detail.today))
+        val periodToday = com.daigan.record.core.time.GameCalendar.gameDate(detail.now, period.refresh.toCore())
+        val last = maxOf(first, minOf(period.endDate, periodToday))
         val clamped = date.coerceIn(first, last)
         _uiState.value = buildState(detail, periodId, clamped)
     }
@@ -147,11 +150,13 @@ class BackfillViewModel @Inject constructor(
             dailyRefresh = period.refresh.dailyRefresh,
             weeklyRefreshDay = period.refresh.weeklyRefreshDay,
             weeklyRefreshTime = period.refresh.weeklyRefreshTime,
+            monthlyRefreshDays = period.refresh.monthlyRefreshDays,
         )
         val first = period.startDate
-        val last = maxOf(first, minOf(period.endDate, detail.today))
+        val periodToday = com.daigan.record.core.time.GameCalendar.gameDate(detail.now, period.refresh.toCore())
+        val last = maxOf(first, minOf(period.endDate, periodToday))
         val status = com.daigan.record.core.time.GameCalendar.hostingStatus(
-            detail.today,
+            periodToday,
             period.startDate,
             period.endDate,
         )
@@ -174,9 +179,9 @@ class BackfillViewModel @Inject constructor(
             )
         }
         val occurrences = detail.occurrences
-            .filter { occurrence -> detail.tasksForPeriod(periodId).any { it.id == occurrence.taskDefinitionId } }
+            .filter { occurrence -> detail.tasks.filter { it.periodId == periodId }.any { it.id == occurrence.taskDefinitionId } }
             .associateBy { it.taskDefinitionId to it.occurrenceKey }
-        val targets = detail.tasksForPeriod(periodId).flatMap { task ->
+        val targets = detail.tasks.filter { it.periodId == periodId }.flatMap { task ->
             // A weekly task can have two explicit windows on a day that contains the
             // weekly refresh. Both stay reachable and are identified by their key.
             OccurrenceRules.slotsForDate(
@@ -184,6 +189,11 @@ class BackfillViewModel @Inject constructor(
                 weekdays = task.weekdays,
                 everyNDays = task.everyNDays,
                 monthDay = task.monthDay,
+                monthDays = task.monthDays,
+                activeFrom = task.activeFrom,
+                activeUntil = task.activeUntil,
+                retiredAt = task.retiredAt,
+                serviceWeekdays = period.serviceWeekdays,
                 periodStart = period.startDate,
                 periodEnd = period.endDate,
                 date = date,

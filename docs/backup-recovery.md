@@ -31,3 +31,9 @@ adb shell am instrument -w -r -e class com.daigan.record.backup.BackupRestoreRec
 ```
 
 实际 runner 名称以项目配置为准。对 PREPARED、ROLLBACK_READY、ORIGINAL_FILES_MOVED、FILES_SWAPPED、DATABASE_COMMITTED、DB_COMMITTED 分别运行。第一条应因应用主动杀进程终止；第二条在独立进程验证完整原/新资料和日志清除。两次之间不要卸载或清空测试应用缓存。无 crashAt 的普通全套测试不会杀进程。完整设备验证证据由第五阶段交接报告记录，本说明不宣称未运行的测试通过。
+
+## 旧版批量完成备份兼容修复
+
+旧版托管批量完成会同时保存打卡编号和所属任务编号。恢复时允许这两个编号同时存在，但任务编号必须与打卡所属任务相同；缺失打卡或编号指向不同任务仍拒绝恢复。只保存打卡编号的旧记录继续兼容。无需删除完成历史、修改数据库结构或重新导出旧备份；撤销审计字段原样保留。
+
+回归覆盖旧形态、双编号一致、双编号冲突、缺失打卡、短期任务错误混用打卡，以及实际批量完成后明文/加密导出、恢复和撤销。

@@ -32,6 +32,13 @@ interface OwnerDao {
     @Query("SELECT COUNT(*) FROM owners")
     suspend fun count(): Int
 
+    /**
+     * Permanent removal of one archived owner (UF-031). Callers delete the owner's
+     * accounts/orders first inside the same transaction; this row is last.
+     */
+    @Query("DELETE FROM owners WHERE id = :ownerId")
+    suspend fun deleteById(ownerId: String)
+
     @Insert
     suspend fun insert(owner: OwnerEntity)
 

@@ -47,13 +47,17 @@ class BalancesTest {
         renewalOperationId = null,
     )
 
-    private fun receipt(amountCents: Long, status: ReceiptStatus = ReceiptStatus.ACTIVE) = Receipt(
+    private fun receipt(
+        amountCents: Long,
+        status: ReceiptStatus = ReceiptStatus.ACTIVE,
+        receivedAt: Instant = Instant.EPOCH,
+    ) = Receipt(
         id = "receipt-1",
         operationId = "op-1",
         orderId = "order-1",
         periodId = "period-1",
         amountCents = amountCents,
-        receivedAt = Instant.EPOCH,
+        receivedAt = receivedAt,
         channel = PaymentChannel.WECHAT,
         note = null,
         status = status,
@@ -104,5 +108,31 @@ class BalancesTest {
         assertEquals(8_000L, item.paidCents)
         assertEquals(2_000L, item.outstandingCents)
         assertEquals(0L, item.overpaidCents)
+    }
+
+    @Test
+    fun `future receipts stay in transit and never settle the debt`() {
+        val now = Instant.parse("2026-10-10T00:00:00Z")
+        val arrival = now.plusSeconds(86_400)
+        val pending = Balances.order(
+            order = hostingOrder(),
+            periods = listOf(period(priceCents = 10_000)),
+            receipts = listOf(receipt(amountCents = 10_000, receivedAt = arrival)),
+            now = now,
+        )
+        assertEquals(0L, pending.totalPaidCents)
+        assertEquals(10_000L, pending.totalOutstandingCents)
+        assertEquals(10_000L, pending.totalPendingCents)
+        assertEquals(10_000L, pending.items.single().pendingCents)
+
+        val arrived = Balances.order(
+            order = hostingOrder(),
+            periods = listOf(period(priceCents = 10_000)),
+            receipts = listOf(receipt(amountCents = 10_000, receivedAt = arrival)),
+            now = now.plusSeconds(2 * 86_400),
+        )
+        assertEquals(10_000L, arrived.totalPaidCents)
+        assertEquals(0L, arrived.totalOutstandingCents)
+        assertEquals(0L, arrived.totalPendingCents)
     }
 }

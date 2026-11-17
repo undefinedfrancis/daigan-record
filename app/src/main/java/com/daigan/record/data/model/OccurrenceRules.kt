@@ -36,12 +36,14 @@ object OccurrenceRules {
         periodStart: LocalDate,
         date: LocalDate,
         monthDay: Int? = null,
+        monthDays: Set<Int> = setOfNotNull(monthDay),
+        serviceWeekdays: Set<DayOfWeek> = emptySet(),
     ): Boolean {
-        if (date.isBefore(periodStart)) return false
+        if (date.isBefore(periodStart) || (serviceWeekdays.isNotEmpty() && date.dayOfWeek !in serviceWeekdays)) return false
         return when (recurrence) {
             // One-time work is not recurrence: it never owns a game-day slot.
             RecurrenceType.ONE_TIME -> false
-            RecurrenceType.MONTHLY -> monthDay in 1..31 && date.dayOfMonth == monthDay
+            RecurrenceType.MONTHLY -> date.dayOfMonth in monthDays.ifEmpty { setOfNotNull(monthDay) }
             RecurrenceType.DAILY, RecurrenceType.WEEKLY -> true
             RecurrenceType.SELECTED_WEEKDAYS -> date.dayOfWeek in weekdays
             RecurrenceType.EVERY_N_DAYS -> {
@@ -68,17 +70,30 @@ object OccurrenceRules {
         rules: GameRefreshRules,
         now: Instant,
         monthDay: Int? = null,
+        monthDays: Set<Int> = setOfNotNull(monthDay),
+        serviceWeekdays: Set<DayOfWeek> = emptySet(),
+        activeFrom: LocalDate? = null,
+        activeUntil: LocalDate? = null,
+        retiredAt: Instant? = null,
     ): OccurrenceSlot? {
-        if (!GameCalendar.isWithinPeriod(today, periodStart, periodEnd)) return null
+        if (activeFrom != null && today.isBefore(activeFrom)) return null
+        // 停止生效日之后不再产生任何打卡槽；用户必须先调整生效日期才能继续。
+        if (activeUntil != null && today.isAfter(activeUntil)) return null
+        if (retiredAt != null && today.isAfter(GameCalendar.gameDate(retiredAt, rules))) return null
+        if (!GameCalendar.isWithinPeriod(today, periodStart, periodEnd) ||
+            (serviceWeekdays.isNotEmpty() && today.dayOfWeek !in serviceWeekdays)) return null
         if (recurrence == RecurrenceType.WEEKLY) {
             return weeklySlot(
-                window = GameCalendar.weeklyWindow(now, rules),
+                window = GameCalendar.refreshWindow(now, rules),
                 periodStart = periodStart,
                 periodEnd = periodEnd,
                 rules = rules,
+                serviceWeekdays = serviceWeekdays,
+                activeFrom = activeFrom,
+                retiredAt = retiredAt,
             )
         }
-        if (!appliesOn(recurrence, weekdays, everyNDays, periodStart, today, monthDay)) return null
+        if (!appliesOn(recurrence, weekdays, everyNDays, periodStart, today, monthDay, monthDays, serviceWeekdays)) return null
         return dailySlot(recurrence, today)
     }
 
@@ -97,17 +112,29 @@ object OccurrenceRules {
         date: LocalDate,
         rules: GameRefreshRules,
         monthDay: Int? = null,
+        monthDays: Set<Int> = setOfNotNull(monthDay),
+        serviceWeekdays: Set<DayOfWeek> = emptySet(),
+        activeFrom: LocalDate? = null,
+        activeUntil: LocalDate? = null,
+        retiredAt: Instant? = null,
     ): OccurrenceSlot? {
-        if (!GameCalendar.isWithinPeriod(date, periodStart, periodEnd)) return null
+        if (activeFrom != null && date.isBefore(activeFrom)) return null
+        if (activeUntil != null && date.isAfter(activeUntil)) return null
+        if (retiredAt != null && date.isAfter(GameCalendar.gameDate(retiredAt, rules))) return null
+        if (!GameCalendar.isWithinPeriod(date, periodStart, periodEnd) ||
+            (serviceWeekdays.isNotEmpty() && date.dayOfWeek !in serviceWeekdays)) return null
         if (recurrence == RecurrenceType.WEEKLY) {
             return weeklySlot(
-                window = GameCalendar.weeklyWindowForGameDate(date, rules),
+                window = GameCalendar.refreshWindowForGameDate(date, rules),
                 periodStart = periodStart,
                 periodEnd = periodEnd,
                 rules = rules,
+                serviceWeekdays = serviceWeekdays,
+                activeFrom = activeFrom,
+                retiredAt = retiredAt,
             )
         }
-        if (!appliesOn(recurrence, weekdays, everyNDays, periodStart, date, monthDay)) return null
+        if (!appliesOn(recurrence, weekdays, everyNDays, periodStart, date, monthDay, monthDays, serviceWeekdays)) return null
         return dailySlot(recurrence, date)
     }
 
@@ -125,14 +152,23 @@ object OccurrenceRules {
         date: LocalDate,
         rules: GameRefreshRules,
         monthDay: Int? = null,
+        monthDays: Set<Int> = setOfNotNull(monthDay),
+        serviceWeekdays: Set<DayOfWeek> = emptySet(),
+        activeFrom: LocalDate? = null,
+        activeUntil: LocalDate? = null,
+        retiredAt: Instant? = null,
     ): List<OccurrenceSlot> {
-        if (!GameCalendar.isWithinPeriod(date, periodStart, periodEnd)) return emptyList()
+        if (activeFrom != null && date.isBefore(activeFrom)) return emptyList()
+        if (activeUntil != null && date.isAfter(activeUntil)) return emptyList()
+        if (retiredAt != null && date.isAfter(GameCalendar.gameDate(retiredAt, rules))) return emptyList()
+        if (!GameCalendar.isWithinPeriod(date, periodStart, periodEnd) ||
+            (serviceWeekdays.isNotEmpty() && date.dayOfWeek !in serviceWeekdays)) return emptyList()
         if (recurrence == RecurrenceType.WEEKLY) {
-            return GameCalendar.weeklyWindowsForGameDate(date, rules).mapNotNull { window ->
-                weeklySlot(window, periodStart, periodEnd, rules)
+            return GameCalendar.refreshWindowsForGameDate(date, rules).mapNotNull { window ->
+                weeklySlot(window, periodStart, periodEnd, rules, serviceWeekdays, activeFrom, retiredAt)
             }
         }
-        if (!appliesOn(recurrence, weekdays, everyNDays, periodStart, date, monthDay)) return emptyList()
+        if (!appliesOn(recurrence, weekdays, everyNDays, periodStart, date, monthDay, monthDays, serviceWeekdays)) return emptyList()
         return listOf(dailySlot(recurrence, date))
     }
 
@@ -146,15 +182,23 @@ object OccurrenceRules {
         periodStart: LocalDate,
         periodEnd: LocalDate,
         rules: GameRefreshRules,
+        serviceWeekdays: Set<DayOfWeek> = emptySet(),
+        activeFrom: LocalDate? = null,
+        activeUntil: LocalDate? = null,
+        retiredAt: Instant? = null,
     ): OccurrenceSlot? {
-        if (!GameCalendar.isWithinPeriod(date, periodStart, periodEnd)) return null
-        val window = GameCalendar.weeklyWindowStartingOn(windowStart, rules) ?: return null
+        if (activeFrom != null && date.isBefore(activeFrom)) return null
+        if (activeUntil != null && date.isAfter(activeUntil)) return null
+        if (retiredAt != null && date.isAfter(GameCalendar.gameDate(retiredAt, rules))) return null
+        if (!GameCalendar.isWithinPeriod(date, periodStart, periodEnd) ||
+            (serviceWeekdays.isNotEmpty() && date.dayOfWeek !in serviceWeekdays)) return null
+        val window = GameCalendar.refreshWindowStartingOn(windowStart, rules) ?: return null
         val dayStart = GameCalendar.gameDayStart(date, rules)
         val dayEndExclusive = GameCalendar.nextGameDayStart(date, rules)
         val overlapsDay = window.startInstant < dayEndExclusive &&
             window.endExclusiveInstant > dayStart
         if (!overlapsDay) return null
-        return weeklySlot(window, periodStart, periodEnd, rules)
+        return weeklySlot(window, periodStart, periodEnd, rules, serviceWeekdays, activeFrom, retiredAt)
     }
 
     private fun dailySlot(recurrence: RecurrenceType, date: LocalDate): OccurrenceSlot {
@@ -186,6 +230,9 @@ object OccurrenceRules {
         periodStart: LocalDate,
         periodEnd: LocalDate,
         rules: GameRefreshRules,
+        serviceWeekdays: Set<DayOfWeek>,
+        activeFrom: LocalDate?,
+        retiredAt: Instant?,
     ): OccurrenceSlot? {
         val periodStartInstant = GameCalendar.periodStartInstant(periodStart, rules)
         val periodEndExclusive = GameCalendar.periodEndExclusiveInstant(periodEnd, rules)
@@ -194,9 +241,23 @@ object OccurrenceRules {
         if (!intersects) return null
         val (displayStart, displayEnd) =
             GameCalendar.clampWindowToPeriod(window, periodStart, periodEnd)
+        // Keep the refresh-window key stable, but give the row to the first game
+        // date on which this definition can actually be performed. A refresh day
+        // need not be a service day, and a task can be introduced mid-window.
+        val firstDate = maxOf(displayStart, activeFrom ?: periodStart)
+        val lastDate = minOf(periodEnd,
+            GameCalendar.gameDate(window.endExclusiveInstant.minusNanos(1), rules),
+            retiredAt?.let { GameCalendar.gameDate(it, rules) } ?: periodEnd)
+        val attribution = generateSequence(firstDate) { it.plusDays(1) }
+            .takeWhile { it <= lastDate }
+            .firstOrNull { date ->
+                (serviceWeekdays.isEmpty() || date.dayOfWeek in serviceWeekdays) &&
+                    GameCalendar.gameDayStart(date, rules) < window.endExclusiveInstant &&
+                    GameCalendar.nextGameDayStart(date, rules) > window.startInstant
+            } ?: return null
         return OccurrenceSlot(
             key = "W:${window.startDate}",
-            attributedDate = displayStart,
+            attributedDate = attribution,
             windowStart = displayStart,
             windowEnd = displayEnd,
             weeklyWindowStart = window.startDate,

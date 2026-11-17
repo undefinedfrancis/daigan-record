@@ -52,6 +52,7 @@ class OwnerDetailScreenTest {
                     onRestoreOwner = {},
                     onArchiveAccount = {},
                     onRestoreAccount = {},
+                    onDeleteAccount = {},
                     onCreateOrder = onCreateOrder,
                     onOpenOrder = onOpenOrder,
                 )
@@ -157,6 +158,7 @@ class OwnerDetailScreenTest {
                         onRestoreOwner = {},
                         onArchiveAccount = {},
                         onRestoreAccount = {},
+                        onDeleteAccount = {},
                     )
                 }
             }
@@ -236,6 +238,7 @@ class OwnerDetailScreenTest {
                     onRestoreOwner = {},
                     onArchiveAccount = {},
                     onRestoreAccount = { restored = it },
+                    onDeleteAccount = {},
                 )
             }
         }
@@ -272,6 +275,7 @@ class OwnerDetailScreenTest {
                     onRestoreOwner = {},
                     onArchiveAccount = {},
                     onRestoreAccount = {},
+                    onDeleteAccount = {},
                 )
             }
         }

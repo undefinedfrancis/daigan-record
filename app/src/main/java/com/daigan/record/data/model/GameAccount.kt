@@ -28,6 +28,10 @@ data class GameAccount(
     val defaultTemplateId: String? = null,
     /** Optional login device label (手机/平板/电脑/自定义); null on legacy accounts. */
     val loginDevice: String? = null,
+    /** Free-form game resources/details, one user-defined item per line. */
+    val resourceNotes: String? = null,
+    /** 账号分类（UF-037）；NULL = 未分类。 */
+    val categoryId: String? = null,
 ) {
     val hasStoredPassword: Boolean
         get() = loginMethod == LoginMethod.PASSWORD && !password.isNullOrEmpty()
@@ -45,6 +49,9 @@ data class AccountDraft(
     val defaultTemplateId: String? = null,
     /** Optional login device (手机/平板/电脑/自定义); empty means unset. */
     val loginDevice: String = "",
+    val resourceNotes: String = "",
+    /** 账号分类（UF-037）；null = 未分类。分类本身不在此表单内创建。 */
+    val categoryId: String? = null,
 ) {
     /**
      * Trims every text field and drops the password whenever the account uses
@@ -92,6 +99,8 @@ data class AccountDraft(
             password = account.password.orEmpty(),
             defaultTemplateId = account.defaultTemplateId,
             loginDevice = account.loginDevice.orEmpty(),
+            resourceNotes = account.resourceNotes.orEmpty(),
+            categoryId = account.categoryId,
         )
     }
 }

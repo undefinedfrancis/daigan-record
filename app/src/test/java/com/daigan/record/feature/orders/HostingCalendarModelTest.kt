@@ -45,6 +45,37 @@ class HostingCalendarModelTest {
     )
 
     @Test
+    fun weeklyTaskHasOneCalendarOwnerOnFirstEligibleServiceDay() {
+        val servicePeriod = period.copy(serviceWeekdays = setOf(DayOfWeek.TUESDAY))
+        val weekly = task("weekly", RecurrenceType.WEEKLY)
+        val month = buildHostingCalendarMonth(servicePeriod, listOf(weekly), emptyList(),
+            YearMonth.of(2026, 10), LocalDate.of(2026, 10, 20))
+        assertEquals(listOf(6, 13, 20, 27), month.days.filter { it.tasks.isNotEmpty() }.map { it.date.dayOfMonth })
+        assertEquals("W:2026-10-19", month.days.single { it.date.dayOfMonth == 20 }.tasks.single().occurrenceKey)
+    }
+
+    @Test
+    fun newWeeklyDefinitionAppearsFromItsMidweekActivationDate() {
+        val weekly = task("weekly", RecurrenceType.WEEKLY).copy(activeFrom = LocalDate.of(2026, 10, 21))
+        val month = buildHostingCalendarMonth(period, listOf(weekly), emptyList(),
+            YearMonth.of(2026, 10), LocalDate.of(2026, 10, 21))
+        assertTrue(month.days.filter { it.date.dayOfMonth < 21 }.all { it.tasks.isEmpty() })
+        assertEquals("W:2026-10-19", month.days.single { it.date.dayOfMonth == 21 }.tasks.single().occurrenceKey)
+    }
+
+    @Test
+    fun recordedWeeklyHistoryKeepsItsSavedAttributionWhenServiceDaysChange() {
+        val weekly = task("weekly", RecurrenceType.WEEKLY)
+        val savedDate = LocalDate.of(2026, 10, 19)
+        val saved = done(weekly, savedDate, "W:2026-10-19")
+        val month = buildHostingCalendarMonth(period.copy(serviceWeekdays = setOf(DayOfWeek.TUESDAY)),
+            listOf(weekly), listOf(saved), YearMonth.of(2026, 10), savedDate.plusDays(1))
+        assertEquals(HostingCalendarDayStatus.COMPLETE, month.days.single { it.date == savedDate }.status)
+        assertTrue(month.days.single { it.date == savedDate.plusDays(1) }.tasks.isEmpty())
+        assertEquals(1, month.days.sumOf { day -> day.tasks.count { it.occurrenceKey == saved.occurrenceKey } })
+    }
+
+    @Test
     fun monthlyCalendarOnlyOffersTheFixedDateAndUsesMonthlyCompletion() {
         val task = task("monthly", RecurrenceType.MONTHLY).copy(monthDay = 31)
         val day = LocalDate.of(2026, 10, 31)

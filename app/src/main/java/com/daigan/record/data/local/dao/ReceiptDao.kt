@@ -32,6 +32,13 @@ interface ReceiptDao {
     @Insert
     suspend fun insert(receipt: ReceiptEntity)
 
+    /** Cascade deletes for order/account deletion; corrections go first (audit rows). */
+    @Query("DELETE FROM receipt_corrections WHERE receiptId IN (SELECT id FROM receipts WHERE orderId = :orderId)")
+    suspend fun deleteCorrectionsForOrder(orderId: String)
+
+    @Query("DELETE FROM receipts WHERE orderId = :orderId")
+    suspend fun deleteForOrder(orderId: String)
+
     /**
      * Moves an ACTIVE receipt to a terminal state. The guard is in SQL so a concurrent
      * correction cannot overwrite a receipt that another transaction already handled.

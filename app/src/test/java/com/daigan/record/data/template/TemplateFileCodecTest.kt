@@ -2,6 +2,8 @@ package com.daigan.record.data.template
 
 import com.daigan.record.data.model.ProgressType
 import com.daigan.record.data.model.RecurrenceType
+import com.daigan.record.data.model.TemplateDraft
+import com.daigan.record.data.model.TemplatePricePresetDraft
 import com.daigan.record.testing.TemplateFixtures
 import java.time.DayOfWeek
 import org.junit.Assert.assertEquals
@@ -122,6 +124,70 @@ class TemplateFileCodecTest {
         )
     }
 
+    @Test
+    fun `price presets round trip with exact cents and Chinese labels`() {
+        val decoded = TemplateFileCodec.decode(
+            TemplateFileCodec.encode(
+                template,
+                pricePresets = listOf(
+                    TemplateFixtures.pricePreset(
+                        id = "p-daily",
+                        amountCents = 3000L,
+                        label = "日常价",
+                    ),
+                    TemplateFixtures.pricePreset(id = "p-event", amountCents = 1250L),
+                ),
+            ),
+        ) as TemplateFileResult.Success
+        assertEquals(
+            listOf(3000L to "日常价", 1250L to ""),
+            decoded.content.draft.pricePresets.map { it.amountCentsOrNull() to it.label },
+        )
+        assertEquals(
+            emptyMap<String, String>(),
+            decoded.content.draft.validate(),
+        )
+    }
+
+    @Test
+    fun `a template with no price presets omits the field entirely`() {
+        assertFalse(encoded().contains("pricePresets"))
+    }
+
+    @Test
+    fun `a fractional or unknown price preset field is rejected`() {
+        val fractional = mutateTemplate { templateObject ->
+            JsonObject(
+                templateObject + ("pricePresets" to Json.parseToJsonElement(
+                    """[{"id":"p1","amountCents":12.5,"label":null}]""",
+                )),
+            )
+        }
+        assertTrue(failure(fractional).contains("amountCents"))
+
+        val unknownField = mutateTemplate { templateObject ->
+            JsonObject(
+                templateObject + ("pricePresets" to Json.parseToJsonElement(
+                    """[{"id":"p1","amountCents":100,"label":null,"discount":1}]""",
+                )),
+            )
+        }
+        assertTrue(failure(unknownField).contains("不支持的字段"))
+    }
+
+    @Test
+    fun `too many price presets are rejected`() {
+        val many = (1..TemplateDraft.MAX_PRICE_PRESETS + 1).joinToString(",") {
+            """{"id":"p$it","amountCents":$it,"label":null}"""
+        }
+        val bytes = mutateTemplate { templateObject ->
+            JsonObject(
+                templateObject + ("pricePresets" to Json.parseToJsonElement("[$many]")),
+            )
+        }
+        assertTrue(failure(bytes).contains("价格预设"))
+    }
+
     private fun encoded(): String = String(TemplateFileCodec.encode(template), Charsets.UTF_8)
 
     private fun mutateJson(transform: (JsonObject) -> JsonObject): ByteArray {
@@ -184,7 +250,7 @@ class TemplateFileCodecTest {
     fun `export contains only template content and format metadata`() {
         val json = encoded()
         assertTrue(json.contains("\"format\": \"daigan-template\""))
-        assertTrue(json.contains("\"formatVersion\": 1"))
+        assertTrue(json.contains("\"formatVersion\": ${TemplateFileCodec.FORMAT_VERSION}"))
         listOf("password", "loginAccount", "orders", "receipts", "owners", "accounts", "uid")
             .forEach { forbidden ->
                 assertFalse("template file must not contain $forbidden", json.contains(forbidden))
@@ -218,11 +284,26 @@ class TemplateFileCodecTest {
         assertTrue(failure(wrongFormat).contains("format"))
 
         val wrongVersion = mutateJson { root ->
-            JsonObject(root + ("formatVersion" to JsonPrimitive(2)))
+            JsonObject(
+                root + ("formatVersion" to JsonPrimitive(TemplateFileCodec.FORMAT_VERSION + 1)),
+            )
         }
         val message = failure(wrongVersion)
         assertTrue(message.contains("版本"))
-        assertTrue(message.contains("2"))
+        assertTrue(message.contains("${TemplateFileCodec.FORMAT_VERSION + 1}"))
+    }
+
+    @Test
+    fun `a version one file without price presets still imports`() {
+        // Exactly what every pre-1.7 build wrote, and what the shipped built-in assets
+        // still are: format 1, no pricePresets key at all.
+        val bytes = mutateTemplate { templateObject ->
+            JsonObject(templateObject.filterKeys { it != "pricePresets" })
+        }
+        val decoded = TemplateFileCodec.decode(bytes)
+        assertTrue("decode failed: $decoded", decoded is TemplateFileResult.Success)
+        val content = (decoded as TemplateFileResult.Success).content
+        assertEquals(emptyList<TemplatePricePresetDraft>(), content.draft.pricePresets)
     }
 
     @Test

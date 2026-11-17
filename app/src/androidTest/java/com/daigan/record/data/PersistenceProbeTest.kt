@@ -8,6 +8,7 @@ import com.daigan.record.core.time.TimeProvider
 import com.daigan.record.data.local.RecordDatabase
 import com.daigan.record.data.model.AccountDraft
 import com.daigan.record.data.model.LoginMethod
+import com.daigan.record.data.repository.AttachmentFileCleanup
 import com.daigan.record.data.repository.DefaultGameAccountRepository
 import com.daigan.record.data.repository.DefaultOwnerRepository
 import java.time.Instant
@@ -66,7 +67,15 @@ class PersistenceProbeTest {
             ownerDao = database.ownerDao(),
             accountDao = database.gameAccountDao(),
             orderDao = database.orderDao(),
+            taskDao = database.taskDao(),
+            occurrenceDao = database.occurrenceDao(),
+            receiptDao = database.receiptDao(),
+            attachmentDao = database.attachmentDao(),
+            completionBatchDao = database.completionBatchDao(),
+            categoryDao = database.accountCategoryDao(),
             timeProvider = time,
+            // The probe never deletes an account; file cleanup is a no-op here.
+            attachmentCleanup = AttachmentFileCleanup { 0 },
         )
 
         val existing = ownerRepository.observeActiveOwners().first()

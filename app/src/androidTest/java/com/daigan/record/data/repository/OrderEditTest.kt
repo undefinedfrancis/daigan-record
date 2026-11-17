@@ -193,7 +193,7 @@ class OrderEditTest {
         val periodId = env.database.orderDao().findPeriods(orderId).first().id
 
         expectIllegal { env.orderRepository.updateOrderTitle(orderId, "   ") }
-        expectIllegal { env.orderRepository.updateOrderTitle(orderId, "长".repeat(41)) }
+        expectIllegal { env.orderRepository.updateOrderTitle(orderId, "长".repeat(61)) }
         expectIllegal {
             env.orderRepository.updatePeriodPrice(orderId, periodId, -1, "op-bad-1", null)
         }

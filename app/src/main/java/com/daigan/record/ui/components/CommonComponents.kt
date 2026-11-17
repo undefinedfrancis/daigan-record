@@ -40,7 +40,9 @@ fun PageHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            // Kept deliberately tight: the list below is the content, the header is only
+            // orientation. Long titles still wrap to as many lines as they need.
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -59,11 +61,55 @@ fun PageHeader(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp),
                 )
             }
         }
         actions()
     }
+}
+
+/**
+ * Section label between card groups (UF-035). One role everywhere: 14sp medium in the
+ * secondary colour, so it never competes with the 16sp semi-bold unit titles below it.
+ */
+@Composable
+fun SectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+    trailing: @Composable (() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.invoke()
+    }
+}
+
+/** Secondary line: owner/game/dates/hints. Wraps instead of clipping Chinese text. */
+@Composable
+fun SecondaryText(
+    text: String,
+    modifier: Modifier = Modifier,
+    maxLines: Int = Int.MAX_VALUE,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
 }
 
 /** Honest empty/pending state: no invented numbers, tasks or orders. */

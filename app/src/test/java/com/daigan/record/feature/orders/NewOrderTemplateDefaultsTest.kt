@@ -159,6 +159,68 @@ class NewOrderTemplateDefaultsTest {
         assertTrue(state.templateNotice.orEmpty().contains("账号默认模板"))
     }
 
+
+    @Test
+    fun `category count default is applied when the template has no explicit mode`() = runTest {
+        val inherited = hostingTemplate.copy(
+            id = "tpl-inherited",
+            hostingMode = null,
+            categories = listOf(
+                TemplateFixtures.category("tpl-inherited", "c-count", "打卡")
+                    .copy(hostingMode = com.daigan.record.data.model.HostingMode.COUNT_BASED, targetSessions = 4),
+            ),
+        )
+        val templates = FakeGameTemplateRepository().apply { put(inherited) }
+        val orders = RecordingOrderRepository()
+        val owners = FakeOwnerRepository().apply { ownersById["owner-1"] = owner() }
+        val accounts = FakeGameAccountRepository().apply {
+            accountsById["account-1"] = account(defaultTemplateId = "tpl-inherited")
+        }
+        val viewModel = NewOrderViewModel(
+            SavedStateHandle(
+                mapOf(Routes.OWNER_ID_ARG to "owner-1", Routes.ACCOUNT_ID_ARG to "account-1"),
+            ),
+            owners,
+            accounts,
+            orders,
+            FixedTimeProvider(),
+            templates,
+        )
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals(com.daigan.record.data.model.HostingMode.COUNT_BASED, state.hostingMode)
+        assertEquals("4", state.targetSessionsText)
+        assertTrue(!state.serviceDayMode)
+
+        viewModel.updatePrice("300.00")
+        viewModel.submit()
+        runCurrent()
+        val draft = orders.hostingDrafts.single()
+        assertEquals(com.daigan.record.data.model.HostingMode.COUNT_BASED, draft.hostingMode)
+        assertEquals(4, draft.targetSessions)
+    }
+
+    @Test
+    fun `mixed category modes keep the user choice and report the conflict`() = runTest {
+        val mixed = hostingTemplate.copy(
+            id = "tpl-mixed",
+            hostingMode = null,
+            categories = listOf(
+                TemplateFixtures.category("tpl-mixed", "c-count", "打卡")
+                    .copy(hostingMode = com.daigan.record.data.model.HostingMode.COUNT_BASED, targetSessions = 4),
+                TemplateFixtures.category("tpl-mixed", "c-date", "日期")
+                    .copy(hostingMode = com.daigan.record.data.model.HostingMode.DATE_RANGE, serviceWeekdays = "1,2"),
+            ),
+        )
+        val templates = FakeGameTemplateRepository().apply { put(mixed) }
+        val viewModel = viewModel(templates, defaultTemplateId = "tpl-mixed")
+
+        val state = viewModel.uiState.value
+        assertEquals(com.daigan.record.data.model.HostingMode.DATE_RANGE, state.hostingMode)
+        assertTrue("notice=${state.templateNotice}", state.templateNotice.orEmpty().contains("不一致"))
+    }
+
     @Test
     fun `submitted provenance names the template version at creation`() = runTest {
         val templates = FakeGameTemplateRepository().apply { put(hostingTemplate) }

@@ -1,0 +1,64 @@
+{
+    "generatedBy": "com.daigan.record.backup.Stage5ExchangeTest#b5NoEditEchoChain2",
+    "description": "Android production restore + immediate re-export of the browser-native plain export (no business edits)",
+    "appVersionName": "1.8.4",
+    "appVersionCode": 13,
+    "roomSchema": 15,
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "device": "Google sdk_gphone64_arm64",
+    "apiLevel": 36,
+    "hardware": "emulator",
+    "watermark": "emulator-not-physical-device",
+    "generatedAt": "2026-03-10T02:00:00Z",
+    "syntheticDataOnly": true,
+    "attachmentKind": "real-jpeg-produced-on-device",
+    "extra": {
+        "input": "web-chain2-plain.dgbk",
+        "inputSha256": "13af706ceaddced033492d95f635e5df73ffc1dce1e1c76a5d5c49d809a2197e"
+    },
+    "files": [
+        {
+            "file": "android-chain2-noedit-echo.dgbk",
+            "sha256": "1bf23b467e7380fdeccc53e4ff660319694edab1110c6b7906833477a9216312",
+            "sizeBytes": 5722,
+            "encrypted": false
+        },
+        {
+            "file": "android-chain2-noedit-echo-canonical.json",
+            "sha256": "d47fe48d6781b340fdd54e56d207e15e7c089a5109f113d098b280b5cee8d2e7",
+            "sizeBytes": 30627
+        }
+    ],
+    "rowCounts": {
+        "owners": 2,
+        "owner_number_sequence": 1,
+        "account_categories": 2,
+        "game_accounts": 2,
+        "game_server_options": 0,
+        "game_templates": 2,
+        "template_categories": 5,
+        "template_tasks": 6,
+        "template_price_presets": 0,
+        "template_seed_state": 1,
+        "completion_batches": 0,
+        "orders": 3,
+        "hosting_periods": 2,
+        "hosting_sessions": 1,
+        "order_price_changes": 0,
+        "task_definitions": 4,
+        "task_occurrences": 11,
+        "task_progress_events": 2,
+        "completion_batch_items": 0,
+        "attachments": 1,
+        "receipts": 1,
+        "receipt_corrections": 0,
+        "order_creation_operations": 3,
+        "reminder_settings": 0
+    },
+    "limitations": [
+        "Emulator only: no physical device participated.",
+        "Synthetic data; no real user records or secrets.",
+        "exportedAt / ZIP timestamps change per run, so archive hashes differ between runs."
+    ]
+}

@@ -6,6 +6,8 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.daigan.record.data.model.BatchItemType
 import com.daigan.record.data.model.BatchScope
+import com.daigan.record.data.model.HostingMode
+import com.daigan.record.data.model.NumericMode
 import com.daigan.record.data.model.OrderType
 import com.daigan.record.data.model.PaymentMode
 import com.daigan.record.data.model.ProgressType
@@ -37,6 +39,7 @@ import java.time.LocalDate
         Index(value = ["accountId"], name = "index_orders_accountId"),
         Index(value = ["accountId", "type"], name = "index_orders_accountId_type"),
         Index(value = ["type", "completedAt"], name = "index_orders_type_completedAt"),
+        Index(value = ["archivedAt"], name = "index_orders_archivedAt"),
     ],
 )
 data class OrderEntity(
@@ -66,6 +69,71 @@ data class OrderEntity(
     val sourceTemplateName: String? = null,
     val sourceTemplateVersion: String? = null,
     val cancelledAt: Instant? = null,
+    val archivedAt: Instant? = null,
+    /**
+     * Persisted hosting mode (schema 13). NULL means "written before the mode existed"
+     * and reads as date-based hosting; no historical order is reinterpreted.
+     */
+    val hostingMode: HostingMode? = null,
+    /** Agreed number of check-in rounds; NULL unless the order is count-based. */
+    val targetSessions: Int? = null,
+    /**
+     * Optional business colour of **this order** (UF-028), stored as a packed ARGB int.
+     *
+     * Colour belongs to the order, not to the game account: two orders on the same
+     * account may carry different colours, and NULL means "no colour chosen" (the UI
+     * then falls back to a neutral, order-derived tint). Schema 14; schema 13 rows read
+     * as NULL and are never assigned a colour from the old account-level preference.
+     */
+    val orderColor: Int? = null,
+    /**
+     * 每月刷新日（逗号分隔 1–31）。Schema 15 起由便携契约承载：网页端一直有该字段，
+     * NULL 表示按周刷新。
+     */
+    val monthlyRefreshDays: String? = null,
+)
+
+/**
+ * One check-in round of a count-based hosting order.
+ *
+ * `sessionIndex` is the durable identity of the round (1-based, unique per order), which
+ * is why repeated taps or concurrent completion can never count the same round twice.
+ * Deleting an order removes its rounds in the same transaction; reopening a round keeps
+ * the row and only clears [completedAt].
+ */
+@Entity(
+    tableName = "hosting_sessions",
+    foreignKeys = [
+        ForeignKey(
+            entity = OrderEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["orderId"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["orderId"], name = "index_hosting_sessions_orderId"),
+        Index(
+            value = ["orderId", "sessionIndex"],
+            unique = true,
+            name = "index_hosting_sessions_orderId_sessionIndex",
+        ),
+        Index(value = ["periodId"], name = "index_hosting_sessions_periodId"),
+    ],
+)
+data class HostingSessionEntity(
+    @PrimaryKey val id: String,
+    val orderId: String,
+    val sessionIndex: Int,
+    val createdAt: Instant,
+    val completedAt: Instant?,
+    val completionBatchId: String? = null,
+    /**
+     * 归属期次（schema 15，NOT NULL）。必须属于同一订单且该期次 serviceCount 非空；
+     * Android 13/14 的计次订单恰好只有一个期次，因此历史行可由 14→15 迁移证明归属。
+     */
+    val periodId: String,
 )
 
 /**
@@ -116,6 +184,12 @@ data class HostingPeriodEntity(
     val weeklyRefreshMinutes: Int,
     val createdAt: Instant,
     val renewalOperationId: String?,
+    val serviceDays: Int? = null,
+    val serviceWeekdays: String? = null,
+    /** 每月刷新日（逗号分隔 1–31）；NULL 表示按周刷新。Schema 15。 */
+    val monthlyRefreshDays: String? = null,
+    /** 按次数模式：本**期次**的总次数目标。Schema 15；NULL 表示按日期/工作日模式。 */
+    val serviceCount: Int? = null,
 )
 
 /**
@@ -173,6 +247,15 @@ data class TaskDefinitionEntity(
     val createdAt: Instant,
     val updatedAt: Instant,
     val monthDay: Int? = null,
+    val monthDays: String? = null,
+    val retiredAt: Instant? = null,
+    val activeFrom: LocalDate? = null,
+    /** 任务生效截止日（schema 15）；NULL 表示随期次结束。 */
+    val activeUntil: LocalDate? = null,
+    /** 数值口径（schema 15）；NULL 读作 PER_OCCURRENCE。 */
+    val numericMode: NumericMode? = null,
+    /** 任务自身颜色（不透明 ARGB）；NULL 表示继承订单色。 */
+    val colorArgb: Int? = null,
 )
 
 /**

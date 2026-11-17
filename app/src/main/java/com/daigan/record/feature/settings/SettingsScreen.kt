@@ -16,11 +16,16 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.daigan.record.ui.components.PageHeader
 import com.daigan.record.ui.navigation.SettingsSection
 
@@ -30,7 +35,10 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenSection: (SettingsSection) -> Unit,
     modifier: Modifier = Modifier,
+    pageTransitionViewModel: PageTransitionViewModel = hiltViewModel(),
 ) {
+    val pageTransitions by pageTransitionViewModel.pageTransitionAnimations
+        .collectAsStateWithLifecycle()
     Column(modifier = modifier.fillMaxSize()) {
         PageHeader(title = "设置", onBack = onBack)
         Column(
@@ -49,6 +57,34 @@ fun SettingsScreen(
                     SettingsEntry(
                         title = section.title,
                         onClick = { onOpenSection(section) },
+                    )
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "页面切换动效", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "关闭后页面切换立即完成，不再播放渐变或滑动过渡；" +
+                                "仅影响页面切换，不影响加载提示。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = pageTransitions,
+                        onCheckedChange = pageTransitionViewModel::setPageTransitionAnimations,
+                        modifier = Modifier.testTag("settings-page-transition-switch"),
                     )
                 }
             }

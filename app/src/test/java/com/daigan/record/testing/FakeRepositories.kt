@@ -150,6 +150,9 @@ class FakeGameAccountRepository : GameAccountRepository {
 
     override fun observeArchivedAccounts(): Flow<List<ArchivedAccount>> = archivedAccounts
 
+    override fun observeActiveAccounts(): Flow<List<GameAccount>> =
+        kotlinx.coroutines.flow.flowOf(accountsById.values.toList())
+
     override suspend fun findAccount(accountId: String): GameAccount? = accountsById[accountId]
 
     override suspend fun createAccount(ownerId: String, draft: AccountDraft): GameAccount {

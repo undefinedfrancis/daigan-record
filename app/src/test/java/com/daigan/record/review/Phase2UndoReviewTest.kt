@@ -21,6 +21,7 @@ import com.daigan.record.feature.today.TodayViewModel
 import com.daigan.record.testing.FakeOrderRepository
 import com.daigan.record.testing.FakeReceiptRepository
 import com.daigan.record.testing.FixedTimeProvider
+import com.daigan.record.testing.InMemoryUiPreferenceStore
 import com.daigan.record.testing.MainDispatcherRule
 import com.daigan.record.testing.account
 import com.daigan.record.testing.fixedInstant
@@ -65,7 +66,7 @@ class Phase2UndoReviewTest {
                 }
             }
         }
-        val viewModel = TodayViewModel(FixedTimeProvider(), repository)
+        val viewModel = TodayViewModel(FixedTimeProvider(), repository, InMemoryUiPreferenceStore())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect()
         }
@@ -95,7 +96,7 @@ class Phase2UndoReviewTest {
                 return BulkCompletionResult("effective-batch", 1, 0, false)
             }
         }
-        val vm = TodayViewModel(FixedTimeProvider(), repository)
+        val vm = TodayViewModel(FixedTimeProvider(), repository, InMemoryUiPreferenceStore())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         vm.completeAllHosting()
         vm.completeAllHosting()
@@ -122,7 +123,7 @@ class Phase2UndoReviewTest {
                 return BulkCompletionResult("batch-$calls", 1, 0, false)
             }
         }
-        val vm = TodayViewModel(FixedTimeProvider(), repository)
+        val vm = TodayViewModel(FixedTimeProvider(), repository, InMemoryUiPreferenceStore())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         vm.completeAllHosting()
         runCurrent()
@@ -180,7 +181,7 @@ class Phase2UndoReviewTest {
                 return UndoResult(1, emptyList(), false)
             }
         }
-        val today = TodayViewModel(FixedTimeProvider(), repository)
+        val today = TodayViewModel(FixedTimeProvider(), repository, InMemoryUiPreferenceStore())
         val attachments = object : AttachmentRepository {
             override fun observeForOrder(orderId: String) = flowOf(emptyList<Attachment>())
             override suspend fun addAttachment(taskDefinitionId: String?, occurrenceId: String?, sourceUri: Uri): Attachment = error("unused")
@@ -195,6 +196,7 @@ class Phase2UndoReviewTest {
             attachmentRepository = attachments,
             receiptRepository = FakeReceiptRepository(),
             timeProvider = FixedTimeProvider(),
+            progressRepository = com.daigan.record.testing.FakeProgressCommandService(),
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { today.uiState.collect() }
         runCurrent()

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.daigan.record.data.model.GameTemplateSummary
 import com.daigan.record.data.model.TemplateDraft
 import com.daigan.record.data.repository.GameTemplateRepository
+import com.daigan.record.data.repository.ServerOptionRepository
 import com.daigan.record.data.repository.TemplateImportResolution
 import com.daigan.record.data.template.TemplateFileCodec
 import com.daigan.record.data.template.TemplateFileContent
@@ -17,6 +18,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -27,6 +29,11 @@ data class TemplateImportPreview(
     val draft: TemplateDraft,
     val categoryCount: Int,
     val taskCount: Int,
+    /**
+     * 区服选项：文件带着它们，导入时必须一路传到 repository，否则用户配置的区服列表
+     * 在界面导入路径上会被静默丢弃（repository 与网页端都会写入它们）。
+     */
+    val serverOptions: List<String> = emptyList(),
     val conflict: GameTemplateSummary?,
     /** The name save-as will actually use, computed against the whole library. */
     val saveAsName: String,
@@ -47,6 +54,7 @@ data class TemplateLibraryUiState(
 class TemplateLibraryViewModel @Inject constructor(
     private val templateRepository: GameTemplateRepository,
     private val fileRepository: TemplateFileRepository,
+    private val serverOptionRepository: ServerOptionRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TemplateLibraryUiState())
@@ -134,6 +142,7 @@ class TemplateLibraryViewModel @Inject constructor(
                 draft = preview.draft,
                 categoryCount = preview.categoryCount,
                 taskCount = preview.taskCount,
+                serverOptions = preview.serverOptions,
             )
             runCatching { templateRepository.importTemplate(content, resolution) }
                 .onSuccess { imported ->
@@ -175,7 +184,16 @@ class TemplateLibraryViewModel @Inject constructor(
                 _uiState.update { it.copy(busy = false, message = "模板不存在，可能已被删除") }
                 return@launch
             }
-            val bytes = TemplateFileCodec.encode(template)
+            // Pass both optional collections explicitly: `encode` defaults them to the
+            // template's own presets and an empty option list, and silently exporting a
+            // template without its 区服 options would drop data the user configured.
+            val bytes = TemplateFileCodec.encode(
+                template,
+                serverOptions = runCatching {
+                    serverOptionRepository.observeForGame(template.gameName).first()
+                }.getOrDefault(emptyList()),
+                pricePresets = template.pricePresets,
+            )
             runCatching { fileRepository.write(uri, bytes) }
                 .onSuccess {
                     _uiState.update {
@@ -236,6 +254,7 @@ class TemplateLibraryViewModel @Inject constructor(
         draft = draft,
         categoryCount = categoryCount,
         taskCount = taskCount,
+        serverOptions = serverOptions,
         conflict = conflict,
         saveAsName = saveAsName,
     )

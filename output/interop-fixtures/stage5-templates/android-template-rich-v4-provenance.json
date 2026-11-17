@@ -1,0 +1,37 @@
+{
+    "generatedBy": "a1ExportRichTemplateForBrowser",
+    "description": "Android production template export (format 4), authored through the template repository",
+    "appVersionName": "1.8.4",
+    "appVersionCode": 13,
+    "roomSchema": 15,
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "device": "sdk_gphone64_arm64",
+    "apiLevel": 36,
+    "hardware": "emulator",
+    "watermark": "emulator-not-physical-device",
+    "syntheticDataOnly": true,
+    "templateId": "f33e1204-17e0-47da-8811-727d4438cf01",
+    "files": [
+        {
+            "file": "android-template-rich-v4.json",
+            "sha256": "2b639030ee72a612d884dab65852c30709a36d55f1e98da7d31e23265229a460",
+            "sizeBytes": 7288
+        }
+    ],
+    "extra": {
+        "templateFormat": 4,
+        "templateId": "f33e1204-17e0-47da-8811-727d4438cf01",
+        "defaultOrderTitle": "安卓模板默认标题",
+        "categoryCount": 2,
+        "taskCount": 7,
+        "pricePresetCount": 2,
+        "serverOptions": [
+            "官服",
+            "渠道服"
+        ],
+        "hostingMode": "COUNT_BASED",
+        "targetSessions": "6",
+        "writtenThrough": "TemplateLibraryViewModel.exportTo + ContentResolverTemplateFileRepository"
+    }
+}

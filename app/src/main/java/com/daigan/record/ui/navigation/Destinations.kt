@@ -13,6 +13,7 @@ object Routes {
     const val SERVER_OPTIONS = "settings/templates/server-options"
     const val REMINDERS = "settings/reminders"
     const val BACKUP = "settings/backup"
+    const val UPDATES = "settings/updates"
 
     const val ARCHIVED = "accounts/archived"
     const val OWNER_DETAIL = "accounts/owner/{ownerId}"
@@ -21,6 +22,8 @@ object Routes {
 
     const val ORDER_NEW = "orders/new?ownerId={ownerId}&accountId={accountId}"
     const val ORDER_DETAIL = "orders/{orderId}"
+    /** Unified order editor (UF-030): one page for every field correction. */
+    const val ORDER_EDIT = "orders/{orderId}/edit"
     const val ORDER_BACKFILL = "orders/{orderId}/backfill?periodId={periodId}"
 
     const val OWNER_ID_ARG = "ownerId"
@@ -43,6 +46,8 @@ object Routes {
         "orders/new?ownerId=$ownerId&accountId=$accountId"
 
     fun orderDetail(orderId: String): String = "orders/$orderId"
+
+    fun orderEdit(orderId: String): String = "orders/$orderId/edit"
 
     fun orderBackfill(orderId: String, periodId: String): String =
         "orders/$orderId/backfill?periodId=$periodId"
@@ -71,6 +76,10 @@ enum class SettingsSection(
     BACKUP(
         key = "backup",
         title = "备份与恢复",
+    ),
+    UPDATES(
+        key = "updates",
+        title = "版本管理",
     ),
     ;
 

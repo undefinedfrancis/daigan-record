@@ -45,9 +45,11 @@ fun buildHostingCalendarMonth(
         dailyRefresh = period.refresh.dailyRefresh,
         weeklyRefreshDay = period.refresh.weeklyRefreshDay,
         weeklyRefreshTime = period.refresh.weeklyRefreshTime,
+        monthlyRefreshDays = period.refresh.monthlyRefreshDays,
     )
     val periodTasks = tasks.filter { it.periodId == period.id }.sortedBy { it.sortOrder }
     val occurrenceMap = occurrences.associateBy { it.taskDefinitionId to it.occurrenceKey }
+    val occurrencesByDate = occurrences.groupBy { it.taskDefinitionId to it.attributedDate }
 
     fun day(date: LocalDate): HostingCalendarDay {
         val inside = date in period.startDate..period.endDate
@@ -57,6 +59,11 @@ fun buildHostingCalendarMonth(
                 weekdays = task.weekdays,
                 everyNDays = task.everyNDays,
                 monthDay = task.monthDay,
+                monthDays = task.monthDays,
+                activeFrom = task.activeFrom,
+                activeUntil = task.activeUntil,
+                retiredAt = task.retiredAt,
+                serviceWeekdays = period.serviceWeekdays,
                 periodStart = period.startDate,
                 periodEnd = period.endDate,
                 date = date,
@@ -64,7 +71,9 @@ fun buildHostingCalendarMonth(
             )
                 // A weekly window can overlap multiple game dates. Its single saved
                 // attribution date is the only date that owns the row in this calendar.
-                .filter { it.attributedDate == date }
+                .filter { slot ->
+                    (occurrenceMap[task.id to slot.key]?.attributedDate ?: slot.attributedDate) == date
+                }
                 .map { slot ->
                     HostingCalendarTask(
                         task = task,
@@ -73,14 +82,21 @@ fun buildHostingCalendarMonth(
                     )
                 }
         }
-        val completeCount = scheduled.count { it.completed }
+        // Persisted rows own their original attribution even when a later service
+        // mask or task-definition change no longer generates that historical slot.
+        val saved = if (!inside) emptyList() else periodTasks.flatMap { task ->
+            occurrencesByDate[task.id to date].orEmpty()
+                .map { HostingCalendarTask(task, it.occurrenceKey, it) }
+        }
+        val visible = (scheduled + saved).distinctBy { it.task.id to it.occurrenceKey }
+        val completeCount = visible.count { it.completed }
         val status = when {
-            scheduled.isEmpty() -> HostingCalendarDayStatus.NONE
-            completeCount == scheduled.size -> HostingCalendarDayStatus.COMPLETE
+            visible.isEmpty() -> HostingCalendarDayStatus.NONE
+            completeCount == visible.size -> HostingCalendarDayStatus.COMPLETE
             completeCount > 0 -> HostingCalendarDayStatus.PARTIAL
             else -> HostingCalendarDayStatus.OPEN
         }
-        return HostingCalendarDay(date, inside, date == today, scheduled, status)
+        return HostingCalendarDay(date, inside, date == today, visible, status)
     }
 
     val days = (1..month.lengthOfMonth()).map { day(month.atDay(it)) }

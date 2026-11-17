@@ -50,8 +50,18 @@ object OrderCommandFingerprint {
         token("kind", "HOSTING")
         common(draft.ownerId, draft.accountId, draft.title, draft.priceYuan, draft.paymentMode)
         token("notes", normalizedText(draft.notes))
-        token("start", draft.startDate.toString())
-        token("end", draft.endDate.toString())
+        // Count-based hosting never emits its container dates as terms. The tokens are
+        // added only for the new mode, so fingerprints persisted by earlier builds for
+        // date-based orders stay byte-identical and remain valid retry identities.
+        if (draft.hostingMode == HostingMode.COUNT_BASED) {
+            token("hostingMode", draft.hostingMode.name)
+            token("targetSessions", draft.targetSessions)
+        } else {
+            token("start", draft.startDate.toString())
+            token("end", draft.effectiveEndDate.toString())
+            token("serviceDays", draft.serviceDays)
+            token("serviceWeekdays", draft.serviceWeekdays.sortedBy { it.value }.joinToString(",") { it.name })
+        }
         token("zone", draft.refresh.zoneId.id)
         token("daily", draft.refresh.dailyRefresh.toString())
         token("weeklyDay", draft.refresh.weeklyRefreshDay.name)
@@ -87,7 +97,7 @@ object OrderCommandFingerprint {
                 "task.$index.weekdays",
                 task.weekdays.sortedBy { it.value }.joinToString(",") { it.name },
             )
-            if (task.recurrence == RecurrenceType.MONTHLY) token("task.$index.monthDay", task.monthDayOrNull())
+            if (task.recurrence == RecurrenceType.MONTHLY) token("task.$index.monthDay", task.monthDaysOrNull()?.sorted()?.joinToString(","))
             token(
                 "task.$index.everyN",
                 if (task.recurrence == RecurrenceType.EVERY_N_DAYS) {

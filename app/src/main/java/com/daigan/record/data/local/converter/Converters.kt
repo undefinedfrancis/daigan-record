@@ -3,6 +3,7 @@ package com.daigan.record.data.local.converter
 import androidx.room.TypeConverter
 import com.daigan.record.data.model.BatchItemType
 import com.daigan.record.data.model.BatchScope
+import com.daigan.record.data.model.HostingMode
 import com.daigan.record.data.model.LoginMethod
 import com.daigan.record.data.model.OrderType
 import com.daigan.record.data.model.PaymentMode
@@ -95,4 +96,15 @@ class OrderEnumConverters {
 
     @TypeConverter
     fun toTemplateOrigin(value: String): TemplateOrigin = TemplateOrigin.valueOf(value)
+
+    /**
+     * Nullable on purpose: rows written before schema 13 have no mode column value and
+     * must read as date-based hosting instead of failing or being rewritten.
+     */
+    @TypeConverter
+    fun fromHostingMode(value: HostingMode?): String? = value?.name
+
+    @TypeConverter
+    fun toHostingMode(value: String?): HostingMode? =
+        value?.let { runCatching { HostingMode.valueOf(it) }.getOrNull() }
 }

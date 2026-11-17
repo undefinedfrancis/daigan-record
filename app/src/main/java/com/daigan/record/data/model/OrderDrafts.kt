@@ -20,11 +20,40 @@ data class TaskDraft(
     val weekdays: Set<DayOfWeek> = emptySet(),
     val everyNDays: String = "",
     val monthDay: String = "",
+    val id: String? = null,
+    val periodId: String? = null,
+    /**
+     * Numeric mode (UF-038). Null means PER_OCCURRENCE for compatibility with drafts
+     * created before the mode existed. Cumulative mode records the current absolute
+     * total instead of per-occurrence increments.
+     */
+    val numericMode: NumericMode? = null,
+    /** Inclusive game-date window in which the task is active; blank = open-ended. */
+    val activeFrom: String = "",
+    val activeUntil: String = "",
+    /**
+     * Task-level colour override (opaque ARGB, schema 15). Null means "inherit the order
+     * colour"; it is never derived from the order, so an edit that leaves it null must not
+     * erase a colour that exists only on the task row.
+     */
+    val colorArgb: Int? = null,
 ) {
     fun startDecimal(): BigDecimal? = parseDecimal(startValue)
     fun targetDecimal(): BigDecimal? = parseDecimal(targetValue)
     fun everyNOrNull(): Int? = everyNDays.trim().toIntOrNull()
-    fun monthDayOrNull(): Int? = monthDay.trim().toIntOrNull()
+    fun monthDaysOrNull(): Set<Int>? = parseMonthlyDates(monthDay)
+    fun monthDayOrNull(): Int? = monthDaysOrNull()?.firstOrNull()
+    fun activeFromOrNull(): LocalDate? = parseActiveDate(activeFrom)
+    fun activeUntilOrNull(): LocalDate? = parseActiveDate(activeUntil)
+
+    /** The mode actually stored: a null draft value is ordinary per-occurrence. */
+    val effectiveNumericMode: NumericMode
+        get() = numericMode ?: NumericMode.PER_OCCURRENCE
+
+    private fun parseActiveDate(raw: String): LocalDate? {
+        val trimmed = raw.trim()
+        return if (trimmed.isEmpty()) null else runCatching { LocalDate.parse(trimmed) }.getOrNull()
+    }
 
     companion object {
         fun parseDecimal(raw: String): BigDecimal? =
@@ -89,7 +118,7 @@ data class ShortOrderDraft(
     fun validate(): Map<String, String> {
         val errors = linkedMapOf<String, String>()
         if (title.trim().isEmpty()) errors["title"] = "请填写订单名称"
-        if (title.trim().length > MAX_TITLE_LENGTH) errors["title"] = "订单名称最多 $MAX_TITLE_LENGTH 个字符"
+        if (titleExceedsLimit(title.trim())) errors["title"] = "订单名称最多 $MAX_TITLE_LENGTH 个字符"
         if (priceYuan.isBlank()) {
             errors["price"] = "请填写约定总价"
         } else if (priceCentsOrNull == null) {
@@ -106,7 +135,12 @@ data class ShortOrderDraft(
     }
 
     companion object {
-        const val MAX_TITLE_LENGTH = 40
+        /** Unified with the portable bound: `orders.title` keeps at most 60 code points. */
+        const val MAX_TITLE_LENGTH = 60
+
+        /** 按 Unicode 码点计数（与可移植契约一致），不按 UTF-16 code unit。 */
+        fun titleExceedsLimit(title: String): Boolean =
+            title.codePointCount(0, title.length) > MAX_TITLE_LENGTH
         const val MAX_NOTES_LENGTH = 500
         const val MAX_TASKS = 30
     }
@@ -128,22 +162,58 @@ data class HostingOrderDraft(
     val sourceTemplate: OrderTemplateProvenance? = null,
     /** Stable identity of the whole create command; see [ShortOrderDraft]. */
     val creationOperationId: String = UUID.randomUUID().toString(),
+    /** Optional cumulative service-day mode. When set, [endDate] is derived. */
+    val serviceDays: Int? = null,
+    val serviceWeekdays: Set<DayOfWeek> = emptySet(),
+    /**
+     * 打卡式托管 (UF-033). When [HostingMode.COUNT_BASED], [targetSessions] is the
+     * agreed number of check-in rounds and the date fields below are ignored: they are
+     * kept only because an existing draft/command still carries them, and the repository
+     * stores a single internal container period instead of a business date range.
+     */
+    val hostingMode: HostingMode = HostingMode.DATE_RANGE,
+    val targetSessions: Int? = null,
 ) {
     val priceCentsOrNull: Long? get() = Money.parseYuanToCentsOrNull(priceYuan)
 
+    val countBased: Boolean get() = hostingMode == HostingMode.COUNT_BASED
+
+    val effectiveEndDate: LocalDate
+        get() = serviceDays?.let { GameCalendar.hostingEndDateForWeekdays(startDate, it, serviceWeekdays) } ?: endDate
+
     val durationDays: Int
-        get() = GameCalendar.inclusiveDurationDays(startDate, endDate)
+        get() = GameCalendar.inclusiveDurationDays(startDate, effectiveEndDate)
 
     fun validate(): Map<String, String> {
         val errors = linkedMapOf<String, String>()
         if (title.trim().isEmpty()) errors["title"] = "请填写订单名称"
-        if (title.trim().length > ShortOrderDraft.MAX_TITLE_LENGTH) {
+        if (ShortOrderDraft.titleExceedsLimit(title.trim())) {
             errors["title"] = "订单名称最多 ${ShortOrderDraft.MAX_TITLE_LENGTH} 个字符"
         }
-        if (endDate.isBefore(startDate)) {
-            errors["dates"] = "到期日期不能早于开始日期"
-        } else if (durationDays > MAX_DURATION_DAYS) {
-            errors["dates"] = "托管天数最多 $MAX_DURATION_DAYS 天"
+        if (countBased) {
+            val target = targetSessions
+            if (target == null || target < 1) {
+                errors["targetSessions"] = "请填写大于 0 的打卡次数"
+            } else if (target > CountHosting.MAX_TARGET_SESSIONS) {
+                errors["targetSessions"] = "打卡次数最多 ${CountHosting.MAX_TARGET_SESSIONS} 次"
+            }
+            // No start date, end date, duration or weekday requirement exists in this
+            // mode; nothing is derived from the calendar and nothing can be overdue.
+        } else {
+            if (serviceDays != null && (serviceDays < 1 || serviceDays > MAX_DURATION_DAYS)) {
+                errors["dates"] = "累计托管天数需为 1–$MAX_DURATION_DAYS 的整数"
+            }
+            if (serviceDays != null && serviceWeekdays.isEmpty()) {
+                errors["weekdays"] = "工作日托管至少选择一个星期"
+            }
+            val calculatedEnd = if (serviceDays != null && serviceDays > 0 && serviceWeekdays.isNotEmpty()) {
+                GameCalendar.hostingEndDateForWeekdays(startDate, serviceDays, serviceWeekdays)
+            } else endDate
+            if (calculatedEnd.isBefore(startDate)) {
+                errors["dates"] = "到期日期不能早于开始日期"
+            } else if (serviceDays == null && durationDays > MAX_DURATION_DAYS) {
+                errors["dates"] = "托管天数最多 $MAX_DURATION_DAYS 天"
+            }
         }
         if (priceYuan.isBlank()) {
             errors["price"] = "请填写本期约定价格"
@@ -194,9 +264,10 @@ private fun TaskDraft.validate(index: Int, errors: MutableMap<String, String>) {
             errors["$prefix.target"] = "目标值需大于起始值"
         }
     }
+    validateActiveRange(index, errors)
     when (recurrence) {
-        RecurrenceType.MONTHLY -> if (monthDayOrNull() !in 1..31) {
-            errors["$prefix.monthDay"] = "每月日号需为 1–31 的整数"
+        RecurrenceType.MONTHLY -> if (monthDaysOrNull() == null) {
+            errors["$prefix.monthDay"] = "请输入 1–31 的日号，可用逗号分隔多个日期"
         }
         RecurrenceType.ONE_TIME, RecurrenceType.DAILY, RecurrenceType.WEEKLY -> Unit
         RecurrenceType.SELECTED_WEEKDAYS -> if (weekdays.isEmpty()) {
@@ -206,6 +277,24 @@ private fun TaskDraft.validate(index: Int, errors: MutableMap<String, String>) {
             val n = everyNOrNull()
             if (n == null || n < 1 || n > 365) errors["$prefix.interval"] = "间隔天数需为 1–365 的整数"
         }
+    }
+}
+
+/** Blank means open-ended; filled values must parse and keep activeFrom ≤ activeUntil. */
+private fun TaskDraft.validateActiveRange(index: Int, errors: MutableMap<String, String>) {
+    val prefix = "task.$index"
+    val fromRaw = activeFrom.trim()
+    val untilRaw = activeUntil.trim()
+    val from = if (fromRaw.isEmpty()) null else runCatching { LocalDate.parse(fromRaw) }.getOrNull()
+    if (fromRaw.isNotEmpty() && from == null) {
+        errors["$prefix.activeFrom"] = "开始生效日期格式不正确"
+    }
+    val until = if (untilRaw.isEmpty()) null else runCatching { LocalDate.parse(untilRaw) }.getOrNull()
+    if (untilRaw.isNotEmpty() && until == null) {
+        errors["$prefix.activeUntil"] = "停止生效日期格式不正确"
+    }
+    if (from != null && until != null && until.isBefore(from)) {
+        errors["$prefix.activeUntil"] = "停止生效日期不能早于开始生效日期"
     }
 }
 

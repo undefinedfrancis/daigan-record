@@ -2,6 +2,7 @@ package com.daigan.record.feature.accounts
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +18,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,6 +27,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.daigan.record.data.model.AccountResources
+import com.daigan.record.data.model.AccountResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,6 +58,7 @@ fun AccountFormScreen(
     viewModel: AccountFormViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pendingDraft by viewModel.pendingDraft.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.completed) {
         if (uiState.completed) onDone()
@@ -63,8 +70,13 @@ fun AccountFormScreen(
         onDraftChange = viewModel::onDraftChange,
         onSelectLoginMethod = viewModel::selectLoginMethod,
         onSelectTemplate = viewModel::selectTemplate,
+        onSelectCategory = viewModel::selectCategory,
+        onCreateCategory = viewModel::createCategory,
         onSave = viewModel::save,
         modifier = modifier,
+        hasPendingDraft = pendingDraft != null,
+        onRestoreDraft = viewModel::restoreDraft,
+        onDiscardDraft = viewModel::discardDraft,
     )
 }
 
@@ -75,10 +87,17 @@ internal fun AccountFormScreen(
     onDraftChange: ((AccountDraft) -> AccountDraft) -> Unit,
     onSelectLoginMethod: (LoginMethod) -> Unit,
     onSelectTemplate: (String?) -> Unit,
+    onSelectCategory: (String?) -> Unit = {},
+    onCreateCategory: (String) -> Unit = {},
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
+    hasPendingDraft: Boolean = false,
+    onRestoreDraft: () -> Unit = {},
+    onDiscardDraft: () -> Unit = {},
 ) {
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
+    var serverMenuOpen by rememberSaveable { mutableStateOf(false) }
+    var newCategoryName by rememberSaveable { mutableStateOf("") }
     val draft = uiState.draft
     val errors = uiState.errors
 
@@ -99,6 +118,16 @@ internal fun AccountFormScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (hasPendingDraft) {
+                Text("此账号有未保存草稿。可恢复或丢弃；继续输入会替换旧草稿。")
+                Row {
+                    TextButton(onClick = onRestoreDraft) { Text("恢复草稿") }
+                    TextButton(onClick = onDiscardDraft) { Text("丢弃草稿") }
+                }
+            } else {
+                Text("未完成的输入会自动保留在本机。", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onDiscardDraft) { Text("丢弃当前草稿") }
+            }
             OutlinedTextField(
                 value = draft.gameName,
                 onValueChange = { value -> onDraftChange { it.copy(gameName = value) } },
@@ -156,23 +185,112 @@ internal fun AccountFormScreen(
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "账号分类（选填）",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "只用于按分类查找账号；删除分类只会让账号回到未分类，" +
+                        "不会删除账号、订单、任务或历史。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .testTag("account-category-row"),
+                ) {
+                    FilterChip(
+                        selected = draft.categoryId == null,
+                        onClick = { onSelectCategory(null) },
+                        label = { Text("未分类") },
+                    )
+                    uiState.categories.forEach { category ->
+                        FilterChip(
+                            selected = draft.categoryId == category.id,
+                            onClick = { onSelectCategory(category.id) },
+                            label = { Text(category.name) },
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = newCategoryName,
+                        onValueChange = { newCategoryName = it },
+                        label = { Text("新建分类") },
+                        singleLine = true,
+                        enabled = !uiState.categoryBusy && !uiState.isSaving,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("account-category-new-name"),
+                    )
+                    TextButton(
+                        onClick = {
+                            onCreateCategory(newCategoryName)
+                            newCategoryName = ""
+                        },
+                        enabled = !uiState.categoryBusy && !uiState.isSaving &&
+                            newCategoryName.isNotBlank(),
+                    ) {
+                        Text(if (uiState.categoryBusy) "创建中…" else "创建并选中")
+                    }
+                }
+                uiState.categoryError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                uiState.categoryName?.let { name ->
+                    Text(
+                        text = "所属分类：$name",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(text = "区服", style = MaterialTheme.typography.titleSmall)
                 if (uiState.serverOptions.isNotEmpty()) {
                     Text(
-                        text = "点选常用区服，或在下方直接输入；选项改动不会影响已保存的账号区服。",
+                        text = "可从该游戏的区服预设中下拉选择，也可直接输入；" +
+                            "预设改动不会影响已保存的账号区服。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    ) {
-                        uiState.serverOptions.forEach { option ->
-                            FilterChip(
-                                selected = draft.server == option,
-                                onClick = { onDraftChange { it.copy(server = option) } },
-                                label = { Text(option) },
+                    // UF-032: a dropdown of the selected game's presets. The text field
+                    // below stays editable so custom values keep working.
+                    Box {
+                        TextButton(
+                            onClick = { serverMenuOpen = true },
+                            modifier = Modifier.testTag("account-server-dropdown"),
+                        ) {
+                            Text(
+                                if (draft.server.isBlank()) {
+                                    "选择常用区服（${uiState.serverOptions.size}）"
+                                } else {
+                                    "选择常用区服 · 当前 ${draft.server}"
+                                },
                             )
+                        }
+                        DropdownMenu(
+                            expanded = serverMenuOpen,
+                            onDismissRequest = { serverMenuOpen = false },
+                        ) {
+                            uiState.serverOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        serverMenuOpen = false
+                                        onDraftChange { it.copy(server = option) }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -292,7 +410,7 @@ internal fun AccountFormScreen(
                     supportingText = {
                         Text(
                             errors[AccountField.PASSWORD]
-                                ?: "密码仅保存在本机应用数据库，不会写入日志或分析数据。",
+                                ?: "密码仅保存在本机应用资料和本机草稿，不会写入日志或分析数据。",
                         )
                     },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -344,6 +462,53 @@ internal fun AccountFormScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+
+            val resources = AccountResources.decode(draft.resourceNotes)
+            Text("游戏资源（选填）", style = MaterialTheme.typography.titleSmall)
+            Text("按需添加任意数量的资源，数量也可填写进度或说明。", style = MaterialTheme.typography.bodySmall)
+            resources.entries.forEach { entry ->
+                androidx.compose.runtime.key(entry.id) {
+                    OutlinedTextField(
+                        value = entry.name,
+                        onValueChange = { value -> onDraftChange { current ->
+                            val data = AccountResources.decode(current.resourceNotes)
+                            current.copy(resourceNotes = AccountResources.encode(data.copy(entries = data.entries.map {
+                                if (it.id == entry.id) it.copy(name = value) else it
+                            })))
+                        } },
+                        label = { Text("资源名称") }, modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = entry.value,
+                        onValueChange = { value -> onDraftChange { current ->
+                            val data = AccountResources.decode(current.resourceNotes)
+                            current.copy(resourceNotes = AccountResources.encode(data.copy(entries = data.entries.map {
+                                if (it.id == entry.id) it.copy(value = value) else it
+                            })))
+                        } },
+                        label = { Text("数量 / 详情") }, modifier = Modifier.fillMaxWidth(),
+                    )
+                    TextButton(onClick = { onDraftChange { current ->
+                        val data = AccountResources.decode(current.resourceNotes)
+                        current.copy(resourceNotes = AccountResources.encode(data.copy(entries = data.entries.filterNot { it.id == entry.id })))
+                    } }) { Text("移除此资源") }
+                }
+            }
+            TextButton(onClick = { onDraftChange { current ->
+                val data = AccountResources.decode(current.resourceNotes)
+                current.copy(resourceNotes = AccountResources.encode(data.copy(entries = data.entries +
+                    AccountResource(java.util.UUID.randomUUID().toString(), "", ""))))
+            } }) { Text("添加资源") }
+            OutlinedTextField(
+                value = resources.notes,
+                onValueChange = { value -> onDraftChange { current ->
+                    current.copy(resourceNotes = AccountResources.encode(AccountResources.decode(current.resourceNotes).copy(notes = value)))
+                } },
+                label = { Text("其他资源备注 / 原有详情") },
+                minLines = 3,
+                supportingText = { Text("原有自由填写内容会完整保留。") },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             if (uiState.ownerArchived) {
                 Text(

@@ -52,6 +52,28 @@ class OccurrenceRulesTest {
     private val periodEnd = LocalDate.of(2026, 10, 25)
 
     @Test
+    fun `weekly live and historical slots share first eligible service attribution and stable key`() {
+        val date = LocalDate.of(2026, 10, 20)
+        val now = Instant.parse("2026-10-20T04:00:00Z")
+        val historical = OccurrenceRules.slotForDate(RecurrenceType.WEEKLY, emptySet(), null,
+            periodStart, periodEnd, date, rules, serviceWeekdays = setOf(DayOfWeek.TUESDAY))!!
+        val live = OccurrenceRules.slotForNow(RecurrenceType.WEEKLY, emptySet(), null,
+            periodStart, periodEnd, date, rules, now, serviceWeekdays = setOf(DayOfWeek.TUESDAY))!!
+        assertEquals("W:2026-10-19", historical.key)
+        assertEquals(date, historical.attributedDate)
+        assertEquals(historical, live)
+    }
+
+    @Test
+    fun `weekly activation moves attribution within window without changing identity`() {
+        val date = LocalDate.of(2026, 10, 21)
+        val slot = OccurrenceRules.slotForDate(RecurrenceType.WEEKLY, emptySet(), null,
+            periodStart, periodEnd, date, rules, activeFrom = date)!!
+        assertEquals("W:2026-10-19", slot.key)
+        assertEquals(date, slot.attributedDate)
+    }
+
+    @Test
     fun `daily task gets one slot per game date`() {
         val monday = OccurrenceRules.slotForDate(
             RecurrenceType.DAILY,

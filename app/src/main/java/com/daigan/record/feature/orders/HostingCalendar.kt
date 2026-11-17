@@ -1,5 +1,7 @@
 package com.daigan.record.feature.orders
 
+import com.daigan.record.data.local.toCore
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -72,13 +74,14 @@ internal fun HostingCalendarCard(
     }
 
     val period = periods.firstOrNull { it.id == periodId } ?: currentPeriod
+    val periodToday = com.daigan.record.core.time.GameCalendar.gameDate(detail.now, period.refresh.toCore())
     val firstMonth = YearMonth.from(period.startDate)
     val lastMonth = YearMonth.from(period.endDate)
     val month = runCatching { YearMonth.parse(monthKey) }.getOrDefault(firstMonth)
         .coerceIn(firstMonth, lastMonth)
     val selectedDate = runCatching { LocalDate.parse(selectedDateKey) }.getOrDefault(period.startDate)
-    val calendar = remember(period, detail.tasks, detail.occurrences, month, detail.today) {
-        buildHostingCalendarMonth(period, detail.tasks, detail.occurrences, month, detail.today)
+    val calendar = remember(period, detail.tasks, detail.occurrences, month, periodToday) {
+        buildHostingCalendarMonth(period, detail.tasks, detail.occurrences, month, periodToday)
     }
     val selectedDay = calendar.days.firstOrNull { it.date == selectedDate }
         ?.takeIf { it.inPeriod }
@@ -104,7 +107,7 @@ internal fun HostingCalendarCard(
                                 text = { Text("第 ${option.periodIndex + 1} 期") },
                                 onClick = {
                                     periodId = option.id
-                                    val targetDate = detail.today.coerceIn(option.startDate, option.endDate)
+                                    val targetDate = periodToday.coerceIn(option.startDate, option.endDate)
                                     monthKey = YearMonth.from(targetDate).toString()
                                     selectedDateKey = targetDate.toString()
                                     showPeriods = false
@@ -225,7 +228,7 @@ internal fun HostingCalendarCard(
                             CompletionRow(
                                 title = entry.task.title,
                                 checked = entry.completed,
-                                enabled = enabled && !day.date.isAfter(detail.today),
+                                enabled = enabled && !day.date.isAfter(periodToday),
                                 onCheckedChange = { completed ->
                                     if (onCalendarCompletion != null) {
                                         onCalendarCompletion(period.id, entry.task.id, day.date, entry.occurrenceKey, completed)
@@ -238,7 +241,7 @@ internal fun HostingCalendarCard(
                                     {
                                         NumericEditButton(
                                             initialValue = (entry.occurrence?.value ?: entry.task.currentValue).toPlainString(),
-                                            enabled = enabled && !day.date.isAfter(detail.today),
+                                            enabled = enabled && !day.date.isAfter(periodToday),
                                             onValue = { value ->
                                                 onUpdateOccurrenceProgress(entry.task.id, entry.occurrenceKey, value)
                                             },

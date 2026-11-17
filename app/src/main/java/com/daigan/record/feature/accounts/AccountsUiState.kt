@@ -12,10 +12,26 @@ sealed interface OwnersUiState {
     data class Success(
         val owners: List<OwnerSummary>,
         val archivedCount: Int,
+        /** 跨老板账号视图的行（UF-037）；按老板与分类筛选由 UI 完成。 */
+        val accounts: List<AccountDirectoryRow> = emptyList(),
+        /** 全部分类，用于筛选与分类管理。 */
+        val categories: List<com.daigan.record.data.model.AccountCategory> = emptyList(),
     ) : OwnersUiState
 
     data class Error(val message: String) : OwnersUiState
 }
+
+/**
+ * 一行账号目录（UF-037）。操作始终使用 [account] 的 id：显示名重复的账号分属不同老板时
+ * 也不会选错对象。
+ */
+data class AccountDirectoryRow(
+    val account: com.daigan.record.data.model.GameAccount,
+    val ownerId: String,
+    val ownerNickname: String,
+    val ownerNumberLabel: String,
+    val categoryName: String?,
+)
 
 sealed interface OwnerDetailUiState {
     data object Loading : OwnerDetailUiState
@@ -58,6 +74,13 @@ data class AccountFormUiState(
     val templateName: String? = null,
     /** 区服 options configured for the draft's game name; empty when none. */
     val serverOptions: List<String> = emptyList(),
+    /** 可供选择的账号分类（UF-037）；空列表即「仅未分类」。 */
+    val categories: List<com.daigan.record.data.model.AccountCategory> = emptyList(),
+    /** 当前草稿所属分类名；null 表示未分类。 */
+    val categoryName: String? = null,
+    /** 新建分类的写入状态。 */
+    val categoryBusy: Boolean = false,
+    val categoryError: String? = null,
 )
 
 data class ArchivedRecordsUiState(

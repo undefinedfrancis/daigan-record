@@ -80,6 +80,13 @@ interface OccurrenceDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(occurrence: TaskOccurrenceEntity): Long
 
+    /** Cascade delete for order/account deletion. */
+    @Query(
+        "DELETE FROM task_occurrences WHERE taskDefinitionId IN " +
+            "(SELECT id FROM task_definitions WHERE orderId = :orderId)",
+    )
+    suspend fun deleteForOrder(orderId: String)
+
     @Query(
         "UPDATE task_occurrences SET completedAt = :completedAt, recordedAt = :recordedAt, " +
             "backfilled = :backfilled, completionBatchId = :batchId, value = :value " +

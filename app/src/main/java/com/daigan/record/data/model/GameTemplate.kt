@@ -3,6 +3,7 @@ package com.daigan.record.data.model
 import java.math.BigDecimal
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
@@ -29,6 +30,10 @@ data class TemplateCategory(
     val name: String,
     val sortOrder: Int,
     val tasks: List<TemplateTask>,
+    /** 分类级托管方式（schema 15）；NULL = 继承模板。 */
+    val hostingMode: HostingMode? = null,
+    val targetSessions: Int? = null,
+    val serviceWeekdays: String? = null,
 )
 
 data class TemplateTask(
@@ -45,6 +50,12 @@ data class TemplateTask(
     val everyNDays: Int?,
     val sortOrder: Int,
     val monthDay: Int? = null,
+    val monthDays: Set<Int> = setOfNotNull(monthDay),
+    /** 任务生效起止日期（schema 15）；null 表示随期次。 */
+    val activeFrom: LocalDate? = null,
+    val activeUntil: LocalDate? = null,
+    /** 数值口径（schema 15）；null 读作 PER_OCCURRENCE。 */
+    val numericMode: NumericMode? = null,
 ) {
     val oneTime: Boolean get() = recurrence == RecurrenceType.ONE_TIME
 }
@@ -84,6 +95,18 @@ data class GameTemplate(
     val sortOrder: Int = 0,
     /** Optional per-template price options offered as a dropdown when creating an order. */
     val pricePresets: List<TemplatePricePreset> = emptyList(),
+    /**
+     * Hosting mode this template proposes for new orders (UF-034). It is a **creation
+     * default**: an order copies the mode and round count it was created with, and later
+     * template edits never rewrite an existing order.
+     */
+    val hostingMode: HostingMode? = null,
+    /** Proposed number of check-in rounds; null unless [hostingMode] is count-based. */
+    val targetSessions: Int? = null,
+    /** 模板级服务星期（schema 15）；配合 DATE_RANGE 表示"仅工作日"。 */
+    val serviceWeekdays: String? = null,
+    /** 建单默认标题（UF-036，schema 15）；null = 不预填。 */
+    val defaultOrderTitle: String? = null,
 ) {
     val tasks: List<TemplateTask> get() = categories.flatMap { it.tasks }
 
@@ -93,6 +116,87 @@ data class GameTemplate(
     }
 
     fun supports(kind: TemplateOrderKind): Boolean = tasksFor(kind).isNotEmpty()
+
+    /** Resolved creation defaults; explicit template values win over category consensus. */
+    val serviceDefaults: TemplateServiceDefaults get() = TemplateServiceDefaultsRule.resolve(this)
+}
+
+/**
+ * Creation defaults a template proposes for a new order.
+ *
+ * [conflict] is true when the template does not set an explicit mode and its categories
+ * disagree: the form must then keep the user's current choice and say so, instead of
+ * silently picking the first category. [hostingMode] null without a conflict means
+ * "no opinion" (the form default stays).
+ */
+data class TemplateServiceDefaults(
+    val hostingMode: HostingMode?,
+    val targetSessions: Int?,
+    val serviceWeekdays: Set<DayOfWeek>,
+    val conflict: Boolean = false,
+    /** True when the value came from the template row rather than category consensus. */
+    val explicit: Boolean = false,
+) {
+    companion object {
+        val NONE = TemplateServiceDefaults(null, null, emptySet())
+    }
+}
+
+object TemplateServiceDefaultsRule {
+
+    fun resolve(template: GameTemplate): TemplateServiceDefaults {
+        template.hostingMode?.let { mode ->
+            return normalize(
+                mode = mode,
+                target = template.targetSessions,
+                weekdays = template.serviceWeekdays,
+                explicit = true,
+            )
+        }
+        val declared = template.categories.mapNotNull { category ->
+            val mode = category.hostingMode ?: return@mapNotNull null
+            normalize(mode, category.targetSessions, category.serviceWeekdays)
+        }
+        if (declared.isEmpty()) return TemplateServiceDefaults.NONE
+        val first = declared.first()
+        val allSame = declared.all {
+            it.hostingMode == first.hostingMode &&
+                it.targetSessions == first.targetSessions &&
+                it.serviceWeekdays == first.serviceWeekdays
+        }
+        return if (allSame) first else TemplateServiceDefaults(null, null, emptySet(), conflict = true)
+    }
+
+    fun normalize(
+        mode: HostingMode,
+        target: Int?,
+        weekdays: String?,
+        explicit: Boolean = false,
+    ): TemplateServiceDefaults = when (mode) {
+        HostingMode.COUNT_BASED -> TemplateServiceDefaults(
+            hostingMode = mode,
+            targetSessions = target,
+            serviceWeekdays = emptySet(),
+            explicit = explicit,
+        )
+
+        HostingMode.DATE_RANGE -> TemplateServiceDefaults(
+            hostingMode = mode,
+            targetSessions = null,
+            serviceWeekdays = parseWeekdays(weekdays),
+            explicit = explicit,
+        )
+    }
+
+    /** "1,3,5" → ISO days; blank or invalid input contributes nothing. */
+    fun parseWeekdays(raw: String?): Set<DayOfWeek> {
+        if (raw.isNullOrBlank()) return emptySet()
+        return raw.split(',', '，', ' ')
+            .mapNotNull { it.trim().toIntOrNull() }
+            .filter { it in 1..7 }
+            .map(DayOfWeek::of)
+            .toSet()
+    }
 }
 
 /** Lightweight row for pickers that must not carry every task into a list item. */
@@ -108,6 +212,8 @@ data class GameTemplateSummary(
     val hostingTaskCount: Int,
     val shortTaskCount: Int,
     val sortOrder: Int = 0,
+    val hostingMode: HostingMode = HostingMode.DATE_RANGE,
+    val targetSessions: Int? = null,
 ) {
     val label: String get() = "$gameName · $templateVersion"
 
@@ -133,7 +239,25 @@ data class TemplateDraft(
     val categories: List<TemplateCategoryDraft> = listOf(TemplateCategoryDraft()),
     /** Optional price options the order form offers as a dropdown. Empty is valid. */
     val pricePresets: List<TemplatePricePresetDraft> = emptyList(),
+    /** Hosting mode proposed to new orders (UF-034). Empty dates stay untouched. */
+    val hostingMode: HostingMode = HostingMode.DATE_RANGE,
+    /**
+     * True when the mode above is an explicit choice. False keeps the template row's
+     * mode NULL so it inherits the category consensus (schema 15), preserving the
+     * difference between "explicitly date-based" and "no opinion".
+     */
+    val hostingModeExplicit: Boolean = false,
+    /** Text kept verbatim so a half-typed count never silently rounds. */
+    val targetSessionsText: String = "",
+    /** 模板级服务星期（模板格式 4）。 */
+    val serviceWeekdays: String = "",
+    /** 建单默认标题（UF-036，模板格式 4）；空白归一为不预填。 */
+    val defaultOrderTitle: String = "",
 ) {
+    val countBased: Boolean get() = hostingMode == HostingMode.COUNT_BASED
+
+    fun targetSessionsOrNull(): Int? = targetSessionsText.trim().toIntOrNull()
+
     val taskCount: Int get() = categories.sumOf { it.tasks.size }
     val hostingTaskCount: Int
         get() = categories.sumOf { category -> category.tasks.count { it.recurrence != RecurrenceType.ONE_TIME } }
@@ -150,6 +274,8 @@ data class TemplateDraft(
         zoneText = zoneText.trim(),
         categories = categories.map { it.normalized() },
         pricePresets = pricePresets.map { it.normalized() },
+        targetSessionsText = targetSessionsText.trim(),
+        defaultOrderTitle = TemplateTitleRule.normalizeDefaultOrderTitle(defaultOrderTitle).orEmpty(),
     )
 
     /**
@@ -167,10 +293,20 @@ data class TemplateDraft(
         if (draft.templateVersion.length > MAX_VERSION_LENGTH) {
             errors["templateVersion"] = "模板版本最多 $MAX_VERSION_LENGTH 个字符"
         }
+        TemplateTitleRule.validateDefaultOrderTitle(draft.defaultOrderTitle)?.let {
+            errors["defaultOrderTitle"] = it
+        }
         if (draft.gameVersionNotes.length > MAX_NOTES_LENGTH) {
             errors["gameVersionNotes"] = "游戏版本备注最多 $MAX_NOTES_LENGTH 个字符"
         }
         if (draft.zoneOrNull() == null) errors["zone"] = "时区格式不正确，例如 Asia/Shanghai"
+        if (draft.countBased) {
+            // A count-based template must propose a usable total; the date fields below
+            // stay irrelevant for it.
+            CountHosting.targetSessionError(draft.targetSessionsText)?.let {
+                errors["targetSessions"] = it
+            }
+        }
         if (draft.categories.isEmpty()) errors["categories"] = "请至少保留一个分类"
         if (draft.categories.size > MAX_CATEGORIES) errors["categories"] = "最多 $MAX_CATEGORIES 个分类"
         if (draft.taskCount == 0) errors["tasks"] = "请至少保留一个任务选项"
@@ -255,9 +391,15 @@ data class TemplateDraft(
                             recurrence = task.recurrence,
                             weekdays = task.weekdays,
                             everyNDays = task.everyNDays?.toString().orEmpty(),
-                            monthDay = task.monthDay?.toString().orEmpty(),
+                            monthDay = task.monthDays.ifEmpty { setOfNotNull(task.monthDay) }.sorted().joinToString(","),
+                            numericMode = task.numericMode,
+                            activeFrom = task.activeFrom?.toString().orEmpty(),
+                            activeUntil = task.activeUntil?.toString().orEmpty(),
                         )
                     },
+                    hostingMode = category.hostingMode,
+                    targetSessionsText = category.targetSessions?.toString().orEmpty(),
+                    serviceWeekdays = category.serviceWeekdays.orEmpty(),
                 )
             },
             pricePresets = template.pricePresets
@@ -269,6 +411,11 @@ data class TemplateDraft(
                         label = preset.label.orEmpty(),
                     )
                 },
+            hostingMode = template.hostingMode ?: HostingMode.DATE_RANGE,
+            hostingModeExplicit = template.hostingMode != null,
+            targetSessionsText = template.targetSessions?.toString().orEmpty(),
+            serviceWeekdays = template.serviceWeekdays.orEmpty(),
+            defaultOrderTitle = template.defaultOrderTitle.orEmpty(),
         )
     }
 }
@@ -277,6 +424,15 @@ data class TemplateCategoryDraft(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "",
     val tasks: List<TemplateTaskDraft> = listOf(TemplateTaskDraft()),
+    /**
+     * 分类级托管方式（模板格式 4）。null = 继承模板；DATE_RANGE 是显式按日期。
+     * 历史网页分类的 null 来自保存路径把 'dates' 归一，因此导入时被解释为显式。
+     */
+    val hostingMode: HostingMode? = null,
+    /** 分类目标次数（文本，保持半输入状态不静默取整）。 */
+    val targetSessionsText: String = "",
+    /** 分类服务星期（逗号分隔 ISO 1–7）；配合 DATE_RANGE 表示"仅工作日"。 */
+    val serviceWeekdays: String = "",
 ) {
     fun normalized(): TemplateCategoryDraft = copy(
         name = name.trim(),
@@ -296,11 +452,21 @@ data class TemplateTaskDraft(
     val weekdays: Set<DayOfWeek> = emptySet(),
     val everyNDays: String = "",
     val monthDay: String = "",
+    /** 任务生效起止日期（ISO，模板格式 4）；空表示随期次。 */
+    val activeFrom: String = "",
+    val activeUntil: String = "",
+    /** 数值口径默认值；null 读作 PER_OCCURRENCE（普通任务不变）。 */
+    val numericMode: NumericMode? = null,
 ) {
     fun startDecimal(): BigDecimal? = parseDecimal(startValue)
     fun targetDecimal(): BigDecimal? = parseDecimal(targetValue)
     fun everyNOrNull(): Int? = everyNDays.trim().toIntOrNull()
-    fun monthDayOrNull(): Int? = monthDay.trim().toIntOrNull()
+    fun monthDaysOrNull(): Set<Int>? = parseMonthlyDates(monthDay)
+    fun monthDayOrNull(): Int? = monthDaysOrNull()?.firstOrNull()
+
+    /** A null draft value is ordinary per-occurrence. */
+    val effectiveNumericMode: NumericMode
+        get() = numericMode ?: NumericMode.PER_OCCURRENCE
 
     fun normalized(): TemplateTaskDraft = copy(
         title = title.trim(),
@@ -310,6 +476,10 @@ data class TemplateTaskDraft(
         monthDay = if (recurrence == RecurrenceType.MONTHLY) monthDay.trim() else "",
         everyNDays = if (recurrence == RecurrenceType.EVERY_N_DAYS) everyNDays.trim() else "",
         weekdays = if (recurrence == RecurrenceType.SELECTED_WEEKDAYS) weekdays else emptySet(),
+        // The numeric mode belongs to numeric tasks only; dates are trimmed or kept open.
+        numericMode = numericMode?.takeIf { progressType == ProgressType.NUMERIC },
+        activeFrom = activeFrom.trim(),
+        activeUntil = activeUntil.trim(),
     )
 
     internal fun validate(key: String, errors: MutableMap<String, String>) {
@@ -341,8 +511,8 @@ data class TemplateTaskDraft(
             }
         }
         when (task.recurrence) {
-            RecurrenceType.MONTHLY -> if (task.monthDayOrNull() !in 1..31) {
-                errors["$key.monthDay"] = "每月日号需为 1–31 的整数"
+            RecurrenceType.MONTHLY -> if (task.monthDaysOrNull() == null) {
+                errors["$key.monthDay"] = "请输入 1–31 的日号，可用逗号分隔多个日期"
             }
             RecurrenceType.SELECTED_WEEKDAYS -> if (task.weekdays.isEmpty()) {
                 errors["$key.weekdays"] = "请为指定星期任务选择执行日"
@@ -354,6 +524,32 @@ data class TemplateTaskDraft(
                 }
             }
             RecurrenceType.ONE_TIME, RecurrenceType.DAILY, RecurrenceType.WEEKLY -> Unit
+        }
+        task.validateActiveRange(key, errors)
+    }
+
+    /** Blank means open-ended; filled values must parse and keep activeFrom ≤ activeUntil. */
+    private fun validateActiveRange(key: String, errors: MutableMap<String, String>) {
+        val fromRaw = activeFrom.trim()
+        val untilRaw = activeUntil.trim()
+        val from = if (fromRaw.isEmpty()) {
+            null
+        } else {
+            runCatching { LocalDate.parse(fromRaw) }.getOrNull()
+        }
+        if (fromRaw.isNotEmpty() && from == null) {
+            errors["$key.activeFrom"] = "开始生效日期格式不正确"
+        }
+        val until = if (untilRaw.isEmpty()) {
+            null
+        } else {
+            runCatching { LocalDate.parse(untilRaw) }.getOrNull()
+        }
+        if (untilRaw.isNotEmpty() && until == null) {
+            errors["$key.activeUntil"] = "停止生效日期格式不正确"
+        }
+        if (from != null && until != null && until.isBefore(from)) {
+            errors["$key.activeUntil"] = "停止生效日期不能早于开始生效日期"
         }
     }
 
@@ -404,7 +600,10 @@ fun TemplateTask.toTaskDraft(): TaskDraft = TaskDraft(
     recurrence = recurrence,
     weekdays = weekdays,
     everyNDays = everyNDays?.toString().orEmpty(),
-    monthDay = monthDay?.toString().orEmpty(),
+    monthDay = monthDays.ifEmpty { setOfNotNull(monthDay) }.sorted().joinToString(","),
+    numericMode = numericMode,
+    activeFrom = activeFrom?.toString().orEmpty(),
+    activeUntil = activeUntil?.toString().orEmpty(),
 )
 
 fun GameTemplate.provenance(): OrderTemplateProvenance = OrderTemplateProvenance(

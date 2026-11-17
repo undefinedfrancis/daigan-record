@@ -25,6 +25,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
+/**
+ * Post-commit removal of attachment files whose database rows are gone.
+ *
+ * Deletions (order/account) must never delete files inside their transaction: if the
+ * transaction rolls back the files would be missing. This narrow interface lets the
+ * repositories delete rows first and ask for the file pass afterwards, and lets tests
+ * observe whether the pass ran without constructing a real attachment repository.
+ */
+fun interface AttachmentFileCleanup {
+    /** Returns the number of files removed. Implementations must be safe to retry. */
+    suspend fun cleanupOrphans(): Int
+}
+
 interface AttachmentRepository {
 
     fun observeForOrder(orderId: String): Flow<List<Attachment>>
@@ -63,7 +76,7 @@ class DefaultAttachmentRepository @Inject constructor(
     private val ownerDao: OwnerDao,
     private val timeProvider: TimeProvider,
     private val sync: AttachmentSync,
-) : AttachmentRepository {
+) : AttachmentRepository, AttachmentFileCleanup {
 
     /**
      * A published screenshot and its database row must not interleave with a dataset
@@ -227,6 +240,7 @@ class DefaultAttachmentRepository @Inject constructor(
         val task = taskDao.findById(taskId) ?: throw IllegalArgumentException("任务不存在")
         val order = orderDao.findById(task.orderId) ?: throw IllegalArgumentException("订单不存在")
         require(order.cancelledAt == null) { "该订单已作废，不能修改截图" }
+        require(order.archivedAt == null) { "订单已归档，请先恢复订单" }
         val account = accountDao.findById(order.accountId)
             ?: throw IllegalArgumentException("游戏账号不存在")
         val owner = ownerDao.findById(account.ownerId) ?: throw IllegalArgumentException("老板不存在")

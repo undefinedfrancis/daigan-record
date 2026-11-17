@@ -1,5 +1,7 @@
 package com.daigan.record.feature.orders
 
+import com.daigan.record.data.model.HostingMode
+import com.daigan.record.data.model.NumericMode
 import com.daigan.record.data.model.PaymentChannel
 import com.daigan.record.data.model.PaymentMode
 import com.daigan.record.data.model.ProgressType
@@ -20,6 +22,9 @@ internal data class RestoredOrderCommand(
 
 internal data class RestoredOrderForm(
     val isShort: Boolean,
+    /** Absent in payloads written before count-based hosting; then date-based. */
+    val hostingMode: HostingMode = HostingMode.DATE_RANGE,
+    val targetSessionsText: String = "",
     val title: String,
     val priceYuan: String,
     val paymentMode: PaymentMode,
@@ -32,6 +37,8 @@ internal data class RestoredOrderForm(
     val dailyRefresh: LocalTime,
     val weeklyRefreshDay: DayOfWeek,
     val weeklyRefreshTime: LocalTime,
+    /** 每月刷新日文本（1–31，逗号分隔）；旧载荷没有此项时按周刷新。 */
+    val monthlyRefreshDaysText: String = "",
     val tasks: List<TaskDraft>,
     val initialPaymentEnabled: Boolean,
     val initialAmountYuan: String,
@@ -46,6 +53,8 @@ internal data class RestoredOrderForm(
     val sourceTemplateId: String? = null,
     val sourceTemplateName: String? = null,
     val sourceTemplateVersion: String? = null,
+    val serviceDayMode: Boolean = false,
+    val serviceWeekdays: Set<DayOfWeek> = emptySet(),
 )
 
 /**
@@ -74,6 +83,8 @@ internal object PendingOrderCommandCodec {
         }
         lines += "version=" + VERSION
         put("isShort", form.isShort.toString())
+        put("hostingMode", form.hostingMode.name)
+        put("targetSessionsText", form.targetSessionsText)
         put("title", form.title)
         put("priceYuan", form.priceYuan)
         put("paymentMode", form.paymentMode.name)
@@ -82,10 +93,13 @@ internal object PendingOrderCommandCodec {
         put("startDate", form.startDate.toString())
         put("endDate", form.endDate.toString())
         put("durationText", form.durationText)
+        put("serviceDayMode", form.serviceDayMode.toString())
+        put("serviceWeekdays", form.serviceWeekdays.joinToString(",") { it.name })
         put("zoneText", form.zoneText)
         put("dailyRefresh", form.dailyRefresh.toString())
         put("weeklyRefreshDay", form.weeklyRefreshDay.name)
         put("weeklyRefreshTime", form.weeklyRefreshTime.toString())
+        put("monthlyRefreshDays", form.monthlyRefreshDaysText)
         put("taskCount", form.tasks.size.toString())
         form.tasks.forEachIndexed { index, task ->
             put(
@@ -100,6 +114,10 @@ internal object PendingOrderCommandCodec {
                     task.weekdays.sortedBy { it.value }.joinToString(",") { it.name },
                     task.everyNDays,
                     task.monthDay,
+                    task.numericMode?.name.orEmpty(),
+                    task.activeFrom,
+                    task.activeUntil,
+                    task.colorArgb?.toString().orEmpty(),
                 ).joinToString(FIELD_SEPARATOR.toString()),
             )
         }
@@ -132,7 +150,7 @@ internal object PendingOrderCommandCodec {
         val taskCount = text("taskCount").toInt()
         val tasks = (0 until taskCount).map { index ->
             val fields = text("task.$index").split(FIELD_SEPARATOR)
-            check(fields.size in 8..9) { "malformed task" }
+            check(fields.size in 8..13) { "malformed task" }
             TaskDraft(
                 title = fields[0],
                 progressType = ProgressType.valueOf(fields[1]),
@@ -146,11 +164,23 @@ internal object PendingOrderCommandCodec {
                     .toSet(),
                 everyNDays = fields[7],
                 monthDay = fields.getOrElse(8) { "" },
+                numericMode = fields.getOrElse(9) { "" }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { runCatching { NumericMode.valueOf(it) }.getOrNull() },
+                activeFrom = fields.getOrElse(10) { "" },
+                activeUntil = fields.getOrElse(11) { "" },
+                colorArgb = fields.getOrElse(12) { "" }.toIntOrNull(),
             )
         }
         RestoredOrderCommand(
             form = RestoredOrderForm(
                 isShort = text("isShort").toBooleanStrict(),
+                // Optional keys: a payload written before count-based hosting has none,
+                // and must restore as date-based with no fabricated target.
+                hostingMode = addedOptional("hostingMode")
+                    ?.let { runCatching { HostingMode.valueOf(it) }.getOrNull() }
+                    ?: HostingMode.DATE_RANGE,
+                targetSessionsText = addedOptional("targetSessionsText").orEmpty(),
                 title = text("title"),
                 priceYuan = text("priceYuan"),
                 paymentMode = PaymentMode.valueOf(text("paymentMode")),
@@ -159,10 +189,13 @@ internal object PendingOrderCommandCodec {
                 startDate = LocalDate.parse(text("startDate")),
                 endDate = LocalDate.parse(text("endDate")),
                 durationText = text("durationText"),
+                serviceDayMode = addedOptional("serviceDayMode")?.toBooleanStrictOrNull() ?: false,
+                serviceWeekdays = addedOptional("serviceWeekdays")?.split(",")?.mapNotNull { runCatching { DayOfWeek.valueOf(it) }.getOrNull() }?.toSet().orEmpty(),
                 zoneText = text("zoneText"),
                 dailyRefresh = LocalTime.parse(text("dailyRefresh")),
                 weeklyRefreshDay = DayOfWeek.valueOf(text("weeklyRefreshDay")),
                 weeklyRefreshTime = LocalTime.parse(text("weeklyRefreshTime")),
+                monthlyRefreshDaysText = addedOptional("monthlyRefreshDays").orEmpty(),
                 tasks = tasks,
                 initialPaymentEnabled = text("initialPaymentEnabled").toBooleanStrict(),
                 initialAmountYuan = text("initialAmountYuan"),

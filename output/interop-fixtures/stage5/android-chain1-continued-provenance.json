@@ -1,0 +1,66 @@
+{
+    "generatedBy": "com.daigan.record.backup.Stage5ExchangeTest#b3RestoreChain1ContinuationAndExport",
+    "description": "Android production restore of the browser continuation export, one more absolute total, production re-export",
+    "appVersionName": "1.8.4",
+    "appVersionCode": 13,
+    "roomSchema": 15,
+    "portableSchema": 15,
+    "templateFormat": 4,
+    "device": "Google sdk_gphone64_arm64",
+    "apiLevel": 36,
+    "hardware": "emulator",
+    "watermark": "emulator-not-physical-device",
+    "generatedAt": "2026-03-12T02:00:00Z",
+    "syntheticDataOnly": true,
+    "attachmentKind": "real-jpeg-produced-on-device",
+    "extra": {
+        "input": "web-chain1-continued.dgbk",
+        "inputSha256": "273cb62e686c6435d974faec2ca1b69a3bdd25d9ccad5b1cab89e98e14e1879f",
+        "continuedTaskId": "94c2cf63-7d7d-485f-97bd-8eaca983b3a3",
+        "continuedTotal": "25"
+    },
+    "files": [
+        {
+            "file": "android-chain1-continued.dgbk",
+            "sha256": "5514e586d838e42c4794ecae6ff5c11f52cb916d6b4bbe1d42678ad009395ff1",
+            "sizeBytes": 22609,
+            "encrypted": false
+        },
+        {
+            "file": "android-chain1-continued-canonical.json",
+            "sha256": "2ff4ce65cbbdf497c37747f7ff6987e44c355d94aae5b177927b90d23cf7ed45",
+            "sizeBytes": 44082
+        }
+    ],
+    "rowCounts": {
+        "owners": 2,
+        "owner_number_sequence": 1,
+        "account_categories": 3,
+        "game_accounts": 2,
+        "game_server_options": 0,
+        "game_templates": 1,
+        "template_categories": 1,
+        "template_tasks": 2,
+        "template_price_presets": 0,
+        "template_seed_state": 0,
+        "completion_batches": 2,
+        "orders": 4,
+        "hosting_periods": 4,
+        "hosting_sessions": 4,
+        "order_price_changes": 0,
+        "task_definitions": 10,
+        "task_occurrences": 7,
+        "task_progress_events": 10,
+        "completion_batch_items": 2,
+        "attachments": 1,
+        "receipts": 4,
+        "receipt_corrections": 1,
+        "order_creation_operations": 4,
+        "reminder_settings": 0
+    },
+    "limitations": [
+        "Emulator only: no physical device participated.",
+        "Synthetic data; no real user records or secrets.",
+        "exportedAt / ZIP timestamps change per run, so archive hashes differ between runs."
+    ]
+}

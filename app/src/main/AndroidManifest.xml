@@ -16,10 +16,8 @@
   -->
 
 <!--
-  Offline-only application: no INTERNET permission is declared. Automatic Android
-  cloud backup stays disabled because the local database stores customer login
-  credentials; the explicit, optionally encrypted backup in Settings is the only way
-  data leaves the app.
+  The app uses HTTPS only for checking and downloading releases. Customer data remains
+  local and is never sent to the update service.
 
   POST_NOTIFICATIONS is requested at runtime only when the user enables a reminder.
 -->
@@ -27,6 +25,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".RecordApplication"
@@ -63,6 +63,16 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+        </provider>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
         </provider>
 
         <receiver

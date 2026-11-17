@@ -3,10 +3,12 @@ package com.daigan.record.data.local.di
 import android.content.Context
 import androidx.room.Room
 import com.daigan.record.data.local.RecordDatabase
+import com.daigan.record.data.local.dao.AccountCategoryDao
 import com.daigan.record.data.local.dao.AttachmentDao
 import com.daigan.record.data.local.dao.CompletionBatchDao
 import com.daigan.record.data.local.dao.CreationOperationDao
 import com.daigan.record.data.local.dao.GameAccountDao
+import com.daigan.record.data.local.dao.HostingSessionDao
 import com.daigan.record.data.local.dao.OccurrenceDao
 import com.daigan.record.data.local.dao.OrderDao
 import com.daigan.record.data.local.dao.OwnerDao
@@ -16,6 +18,7 @@ import com.daigan.record.data.local.dao.ReminderSettingsDao
 import com.daigan.record.data.local.dao.AppSettingsDao
 import com.daigan.record.data.local.dao.ServerOptionDao
 import com.daigan.record.data.local.dao.TaskDao
+import com.daigan.record.data.local.dao.TaskProgressEventDao
 import com.daigan.record.data.local.dao.TemplateDao
 import dagger.Module
 import dagger.Provides
@@ -47,7 +50,19 @@ object DatabaseModule {
     fun provideOrderDao(database: RecordDatabase): OrderDao = database.orderDao()
 
     @Provides
+    fun provideAccountCategoryDao(database: RecordDatabase): AccountCategoryDao =
+        database.accountCategoryDao()
+
+    @Provides
+    fun provideTaskProgressEventDao(database: RecordDatabase): TaskProgressEventDao =
+        database.taskProgressEventDao()
+
+    @Provides
     fun provideTaskDao(database: RecordDatabase): TaskDao = database.taskDao()
+
+    @Provides
+    fun provideHostingSessionDao(database: RecordDatabase): HostingSessionDao =
+        database.hostingSessionDao()
 
     @Provides
     fun provideOccurrenceDao(database: RecordDatabase): OccurrenceDao = database.occurrenceDao()

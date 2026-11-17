@@ -1,3 +1,5 @@
+> **反馈工作首要入口：[v1.8.4 之后待处理反馈](docs/00-v1.8.4之后待处理反馈.md)**。只收录当前未处理项，历史反馈状态请先与此清单核对。
+
 <p align="center">
   <img src="docs/design/app-icon/launcher-sage-preview.png" width="96" alt="代肝记录：鼠尾草绿猫耳手账图标">
 </p>
